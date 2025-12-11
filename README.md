@@ -1,10 +1,36 @@
 # Fizzy MCP Server
 
+[![npm version](https://badge.fury.io/js/fizzy-mcp.svg)](https://www.npmjs.com/package/fizzy-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
+
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for [Fizzy](https://fizzy.do) — the project management tool by Basecamp.
 
 > 📖 **Fizzy API Documentation**: [github.com/basecamp/fizzy/blob/main/docs/API.md](https://github.com/basecamp/fizzy/blob/main/docs/API.md)
 
 This MCP server allows AI assistants like Claude, Cursor, and GitHub Copilot to interact with your Fizzy boards, cards, and projects through natural language.
+
+## Table of Contents
+
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Getting Your Fizzy Access Token](#getting-your-fizzy-access-token)
+- [Configuration](#configuration)
+  - [For Cursor IDE](#for-cursor-ide)
+  - [For VS Code with GitHub Copilot](#for-vs-code-with-github-copilot)
+  - [For Claude Desktop](#for-claude-desktop)
+- [Running the Server](#running-the-server)
+- [Environment Variables](#environment-variables)
+- [Available Tools](#available-tools-47-total)
+- [Example Prompts](#example-prompts)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [API Reference](#api-reference)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Features
 
@@ -22,6 +48,41 @@ This MCP server allows AI assistants like Claude, Cursor, and GitHub Copilot to 
 
 - **Node.js 18** or higher
 - A Fizzy account with API access
+
+---
+
+## Quick Start
+
+Get up and running in 3 steps:
+
+1. **Get your Fizzy access token** from [app.fizzy.do](https://app.fizzy.do) → Profile → API → Personal access tokens
+
+2. **Run with npx** (no installation needed):
+   ```bash
+   FIZZY_ACCESS_TOKEN="your-token-here" npx fizzy-mcp
+   ```
+
+3. **Configure your IDE** (e.g., Cursor):
+   - Open Cursor Settings → Features → MCP Servers
+   - Click "Edit in mcp.json" and add:
+   ```json
+   {
+     "mcpServers": {
+       "fizzy": {
+         "command": "npx",
+         "args": ["-y", "fizzy-mcp"],
+         "env": {
+           "FIZZY_ACCESS_TOKEN": "your-token-here"
+         }
+       }
+     }
+   }
+   ```
+   - Restart Cursor
+
+That's it! You can now ask your AI assistant to interact with Fizzy.
+
+For detailed installation options and configuration, see the sections below.
 
 ---
 
@@ -249,7 +310,7 @@ FIZZY_ACCESS_TOKEN="your-token" npx fizzy-mcp --transport http --port 3000
 
 ---
 
-## Available Tools (52 total)
+## Available Tools (47 total)
 
 ### Identity & Accounts (3)
 | Tool | Description |
@@ -395,13 +456,52 @@ curl -H "Authorization: Bearer your-token" \
 
 ---
 
+## FAQ
+
+### How do I get started quickly?
+See the [Quick Start](#quick-start) section above for a 3-step setup guide.
+
+### Is my Fizzy access token secure?
+Your access token is stored in your local IDE configuration and is never sent anywhere except directly to Fizzy's API. When using HTTP/SSE transports, the token is used server-side only. Always keep your token secret and never commit it to version control.
+
+### Can I use this with multiple Fizzy accounts?
+Yes! You can configure multiple MCP server instances in your IDE, each with a different access token. Just give them different names in the configuration (e.g., "fizzy-personal", "fizzy-work").
+
+### What's the difference between the transport modes?
+- **stdio** (default): For IDE integration (Cursor, VS Code, Claude Desktop). Communication happens via standard input/output.
+- **sse**: For web clients that need server-sent events. Runs an HTTP server with SSE endpoints.
+- **http**: For production deployments. Runs an HTTP server with streamable endpoints and health checks.
+
+### Does this work offline?
+No, the server requires an internet connection to communicate with Fizzy's API at `app.fizzy.do`.
+
+### How do I update to the latest version?
+If using npx, it will automatically use the latest version. If installed globally, run `npm update -g fizzy-mcp`. If installed from source, run `git pull && npm install && npm run build`.
+
+### Can I create tags via the API?
+No, tag creation is not available via the Fizzy API. However, you can use `fizzy_toggle_card_tag` which will create a tag if it doesn't exist when toggling it on a card.
+
+### What happens if I hit rate limits?
+The server includes automatic retry logic with exponential backoff for rate limit errors (429 status). It will retry up to 3 times before failing.
+
+### How does ETag caching work?
+The server automatically caches GET requests using ETags. When you request the same resource again, it sends the ETag to Fizzy's API. If the resource hasn't changed, Fizzy returns a 304 Not Modified response, saving bandwidth and improving speed.
+
+### Can I use this in production?
+Yes! Use the HTTP transport mode with proper security settings (`MCP_AUTH_TOKEN`, `MCP_ALLOWED_ORIGINS`, and consider `MCP_BIND_ALL_INTERFACES` for Docker deployments).
+
+### Where can I find the Fizzy API documentation?
+Official Fizzy API docs: [github.com/basecamp/fizzy/blob/main/docs/API.md](https://github.com/basecamp/fizzy/blob/main/docs/API.md)
+
+---
+
 ## API Reference
 
 This server implements all endpoints from the official [Fizzy API Documentation](https://github.com/basecamp/fizzy/blob/main/docs/API.md):
 
 | Category | Endpoints Covered |
 |----------|-------------------|
-| Identity | GET /my/identity.json |
+| Identity | GET /my/identity |
 | Accounts | Embedded in identity |
 | Boards | GET, POST, PUT, DELETE |
 | Cards | GET (list, board, single), POST, PUT, DELETE + filtering |
