@@ -288,9 +288,6 @@ export class McpSessionDO extends DurableObject<Env> {
       
       // Tag Tools
       { name: "fizzy_get_tags", description: "Get all tags in an account", inputSchema: { type: "object", properties: { account_slug: { type: "string" } }, required: ["account_slug"] } },
-      { name: "fizzy_get_board_tags", description: "Get all tags used on a specific board", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, board_id: { type: "string" } }, required: ["account_slug", "board_id"] } },
-      { name: "fizzy_create_tag", description: "Create a new tag in an account", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, title: { type: "string" } }, required: ["account_slug", "title"] } },
-      { name: "fizzy_delete_tag", description: "Delete a tag from an account", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, tag_id: { type: "string" } }, required: ["account_slug", "tag_id"] } },
       
       // User Tools
       { name: "fizzy_get_users", description: "Get all active users in an account", inputSchema: { type: "object", properties: { account_slug: { type: "string" } }, required: ["account_slug"] } },
