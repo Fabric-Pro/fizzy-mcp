@@ -527,7 +527,6 @@ npx fizzy-mcp --transport http --port 3000
 | Tool | Description |
 |------|-------------|
 | `fizzy_get_cards` | List cards with optional filters (status, column, assignees, tags, search) |
-| `fizzy_get_board_cards` | List cards on a specific board |
 | `fizzy_get_card` | Get card details including description, assignees, tags |
 | `fizzy_create_card` | Create a new card with title, description, status, column, assignees, tags, due date |
 | `fizzy_update_card` | Update any card property |
