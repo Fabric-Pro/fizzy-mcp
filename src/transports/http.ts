@@ -1,11 +1,17 @@
 /**
  * Streamable HTTP Transport Handler
  * Creates an HTTP server that handles the MCP Streamable HTTP protocol
- * 
+ *
+ * Multi-User Support:
+ * - Each user provides their own Fizzy token via Authorization: Bearer <token> header
+ * - Each session gets its own FizzyClient instance with the user's token
+ * - Sessions are isolated - users cannot access each other's data
+ *
  * Security Features:
  * - Origin header validation (DNS rebinding protection)
  * - Localhost-only binding by default
- * - Optional Bearer token authentication
+ * - Per-user authentication via Authorization header
+ * - Optional client authentication (MCP_AUTH_TOKEN)
  * - Custom authorization support
  * - Secure CORS configuration
  */
@@ -22,11 +28,19 @@ import {
   sendSecurityError,
   setSecureCorsHeaders,
   getBindAddress,
+  extractFizzyToken,
 } from "../utils/security.js";
+
+export interface HTTPSession {
+  transport: StreamableHTTPServerTransport;
+  client: FizzyClient;
+  fizzyToken: string;
+}
 
 export interface HTTPTransportOptions {
   port: number;
-  client: FizzyClient;
+  /** @deprecated No longer used - each session creates its own client with user's token */
+  client?: FizzyClient;
   /** Maximum concurrent sessions (default: 1000) */
   maxSessions?: number;
   /** Session idle timeout in ms (default: 30 minutes) */
@@ -37,7 +51,7 @@ export interface HTTPTransportOptions {
 
 export interface HTTPTransportServer {
   server: Server;
-  sessionManager: SessionManager<StreamableHTTPServerTransport>;
+  sessionManager: SessionManager<HTTPSession>;
   close: () => Promise<void>;
 }
 
@@ -46,8 +60,7 @@ export interface HTTPTransportServer {
  * Exported for testing
  */
 export function createHTTPRequestHandler(
-  client: FizzyClient,
-  sessionManager: SessionManager<StreamableHTTPServerTransport>,
+  sessionManager: SessionManager<HTTPSession>,
   port: number,
   security: SecurityOptions = {}
 ) {
@@ -93,22 +106,36 @@ export function createHTTPRequestHandler(
     if (url.pathname === "/mcp") {
       // POST - Initialize new session or send message to existing session
       if (req.method === "POST") {
-        let transport = sessionId ? sessionManager.get(sessionId) : undefined;
+        // Extract user's Fizzy token from Authorization header
+        const fizzyToken = extractFizzyToken(req);
+        if (!fizzyToken) {
+          log.warn("Missing Fizzy token in Authorization header");
+          setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            error: "Authorization required",
+            message: "Please provide your Fizzy Personal Access Token via: Authorization: Bearer <token>",
+          }));
+          return;
+        }
 
-        if (!transport) {
+        const session = sessionId ? sessionManager.get(sessionId) : undefined;
+
+        if (!session) {
           // Check if we can create a new session
           if (sessionManager.size >= sessionManager.maxSessions) {
             // Try to clean up expired sessions first
             sessionManager.cleanup();
-            
+
             // Still at capacity after cleanup?
             if (sessionManager.size >= sessionManager.maxSessions) {
               log.warn("Server at capacity, rejecting new session");
-              res.writeHead(503, { 
+              setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
+              res.writeHead(503, {
                 "Content-Type": "application/json",
                 "Retry-After": "60", // Suggest retry after 60 seconds
               });
-              res.end(JSON.stringify({ 
+              res.end(JSON.stringify({
                 error: "Server at capacity",
                 message: "Maximum number of concurrent sessions reached. Please try again later.",
               }));
@@ -117,15 +144,24 @@ export function createHTTPRequestHandler(
           }
 
           log.debug("Creating new HTTP session");
-          
-          // Create new server and transport for this session
-          const server = createFizzyServer(client);
-          
-          transport = new StreamableHTTPServerTransport({
+
+          // Create per-user FizzyClient with the user's token
+          const userClient = new FizzyClient({
+            accessToken: fizzyToken,
+          });
+
+          // Create new server and transport for this session with user's client
+          const server = createFizzyServer(userClient);
+
+          const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => crypto.randomUUID(),
             onsessioninitialized: (newSessionId) => {
               log.info(`HTTP session created: ${newSessionId}`);
-              sessionManager.create(newSessionId, transport!);
+              sessionManager.create(newSessionId, {
+                transport,
+                client: userClient,
+                fizzyToken,
+              });
             },
             onsessionclosed: (closedSessionId) => {
               log.info(`HTTP session closed: ${closedSessionId}`);
@@ -135,26 +171,58 @@ export function createHTTPRequestHandler(
 
           // Connect server to transport
           await server.connect(transport);
+
+          // Handle the initial request
+          await transport.handleRequest(req, res);
+          return;
         }
 
-        await transport.handleRequest(req, res);
+        // Validate token matches the session
+        if (fizzyToken !== session.fizzyToken) {
+          log.warn(`Token mismatch for session: ${sessionId}`);
+          setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            error: "Token mismatch",
+            message: "The Authorization token does not match the session",
+          }));
+          return;
+        }
+
+        // Handle subsequent requests for existing session
+        await session.transport.handleRequest(req, res);
         return;
       }
 
       // GET - SSE stream for server-initiated messages (if session exists)
       if (req.method === "GET") {
         if (!sessionId) {
+          setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Missing mcp-session-id header" }));
           return;
         }
-        
-        const transport = sessionManager.get(sessionId);
-        if (transport) {
+
+        const session = sessionManager.get(sessionId);
+        if (session) {
+          // Validate token matches the session
+          const fizzyToken = extractFizzyToken(req);
+          if (fizzyToken !== session.fizzyToken) {
+            log.warn(`Token mismatch for session: ${sessionId}`);
+            setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
+            res.writeHead(403, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              error: "Token mismatch",
+              message: "The Authorization token does not match the session",
+            }));
+            return;
+          }
+
           log.debug(`SSE stream request for session: ${sessionId}`);
-          await transport.handleRequest(req, res);
+          await session.transport.handleRequest(req, res);
           return;
         }
+        setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Session not found" }));
         return;
@@ -163,17 +231,32 @@ export function createHTTPRequestHandler(
       // DELETE - Close session
       if (req.method === "DELETE") {
         if (!sessionId) {
+          setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Missing mcp-session-id header" }));
           return;
         }
-        
-        const transport = sessionManager.get(sessionId);
-        if (transport) {
+
+        const session = sessionManager.get(sessionId);
+        if (session) {
+          // Validate token matches the session
+          const fizzyToken = extractFizzyToken(req);
+          if (fizzyToken !== session.fizzyToken) {
+            log.warn(`Token mismatch for session: ${sessionId}`);
+            setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
+            res.writeHead(403, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              error: "Token mismatch",
+              message: "The Authorization token does not match the session",
+            }));
+            return;
+          }
+
           log.debug(`Delete request for session: ${sessionId}`);
-          await transport.handleRequest(req, res);
+          await session.transport.handleRequest(req, res);
           return;
         }
+        setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Session not found" }));
         return;
@@ -194,18 +277,18 @@ export function createHTTPRequestHandler(
  * Create HTTP transport server
  */
 export function createHTTPTransportServer(options: HTTPTransportOptions): HTTPTransportServer {
-  const { port, client, maxSessions, sessionTimeout, security = {} } = options;
+  const { port, maxSessions, sessionTimeout, security = {} } = options;
   const log = logger.child("http");
-  
-  const sessionManager = new SessionManager<StreamableHTTPServerTransport>({
+
+  const sessionManager = new SessionManager<HTTPSession>({
     maxSessions: maxSessions ?? 1000,
     sessionTimeout: sessionTimeout ?? 30 * 60 * 1000, // 30 minutes
     onSessionEvicted: (sessionId, reason) => {
       log.info(`Session evicted (${reason}): ${sessionId}`);
     },
   });
-  
-  const handler = createHTTPRequestHandler(client, sessionManager, port, security);
+
+  const handler = createHTTPRequestHandler(sessionManager, port, security);
   const server = createServer(handler);
 
   return {
@@ -215,7 +298,7 @@ export function createHTTPTransportServer(options: HTTPTransportOptions): HTTPTr
       return new Promise((resolve, reject) => {
         // Dispose session manager (stops cleanup timer and clears sessions)
         sessionManager.dispose();
-        
+
         server.close((err) => {
           if (err) reject(err);
           else resolve();
@@ -265,7 +348,23 @@ export async function startHTTPTransport(options: HTTPTransportOptions): Promise
         }
       }
 
+      // Log multi-user authentication info
+      log.info("Multi-user support: Each user provides their own Fizzy token via Authorization header");
+
       resolve(transportServer);
     });
+  });
+}
+/**
+ * Convenience function for starting HTTP transport with security options from environment
+ */
+export async function startSecureHTTPTransport(
+  options: Omit<HTTPTransportOptions, "security" | "client">
+): Promise<HTTPTransportServer> {
+  return startHTTPTransport({
+    ...options,
+    security: {
+      // Security options are read from environment variables automatically
+    },
   });
 }

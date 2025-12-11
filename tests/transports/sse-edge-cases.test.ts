@@ -40,6 +40,10 @@ vi.mock("../../src/server.js", () => ({
 // Mock fetch for FizzyClient
 global.fetch = vi.fn();
 
+// Test Fizzy access token
+// Use env token if available, otherwise use test token
+const TEST_FIZZY_TOKEN = process.env.FIZZY_ACCESS_TOKEN || "test-fizzy-token";
+
 describe("SSE Transport - Edge Cases", () => {
   let client: FizzyClient;
   let sessionManager: SessionManager<SSESession>;
@@ -57,7 +61,7 @@ describe("SSE Transport - Edge Cases", () => {
       sessionTimeout: 30 * 60 * 1000,
       cleanupInterval: 0,
     });
-    handler = createSSERequestHandler(client, sessionManager, 3000);
+    handler = createSSERequestHandler(sessionManager, 3000);
   });
 
   afterEach(() => {
@@ -114,7 +118,7 @@ describe("SSE Transport - Edge Cases", () => {
   describe("Session Management Bugs", () => {
     it("should handle multiple concurrent session creations", async () => {
       const requests = Array.from({ length: 5 }, () => ({
-        req: createMockRequest("GET", "/sse"),
+        req: createMockRequest("GET", "/sse", { authorization: `Bearer ${TEST_FIZZY_TOKEN}` }),
         res: createMockResponse(),
       }));
 
@@ -129,7 +133,10 @@ describe("SSE Transport - Edge Cases", () => {
     });
 
     it("should not leak sessions when response errors before start", async () => {
-      const req = createMockRequest("GET", "/sse", { origin: "http://localhost:3000" });
+      const req = createMockRequest("GET", "/sse", {
+        origin: "http://localhost:3000",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       // Start handler - it will create session and register close handler synchronously
@@ -154,9 +161,11 @@ describe("SSE Transport - Edge Cases", () => {
     });
 
     it("should handle session cleanup when client disconnects mid-request", async () => {
-      const req = createMockRequest("GET", "/sse");
+      const req = createMockRequest("GET", "/sse", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
-      
+
       // Add error handler to prevent unhandled error
       res.on("error", () => {});
 
@@ -171,7 +180,9 @@ describe("SSE Transport - Edge Cases", () => {
 
     it("should handle message to session that was just deleted", async () => {
       // Create a session
-      const sseReq = createMockRequest("GET", "/sse");
+      const sseReq = createMockRequest("GET", "/sse", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const sseRes = createMockResponse();
       await handler(sseReq, sseRes);
 
@@ -181,7 +192,9 @@ describe("SSE Transport - Edge Cases", () => {
       sessionManager.delete(sessionId);
 
       // Try to send a message to the deleted session
-      const msgReq = createMockRequest("POST", `/messages?sessionId=${sessionId}`);
+      const msgReq = createMockRequest("POST", `/messages?sessionId=${sessionId}`, {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const msgRes = createMockResponse();
       await handler(msgReq, msgRes);
 
@@ -196,11 +209,15 @@ describe("SSE Transport - Edge Cases", () => {
           sessionId: "duplicate-id",
           handlePostMessage: vi.fn(),
         } as any,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
       };
       sessionManager.create("duplicate-id", existingSession);
 
       // Create a new SSE connection
-      const req = createMockRequest("GET", "/sse");
+      const req = createMockRequest("GET", "/sse", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
       await handler(req, res);
 
@@ -223,7 +240,9 @@ describe("SSE Transport - Edge Cases", () => {
     });
 
     it("should handle URL with query parameters on /sse", async () => {
-      const req = createMockRequest("GET", "/sse?foo=bar&baz=qux");
+      const req = createMockRequest("GET", "/sse?foo=bar&baz=qux", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -253,13 +272,15 @@ describe("SSE Transport - Edge Cases", () => {
       ];
 
       for (const url of testCases) {
-        const req = createMockRequest("POST", url);
+        const req = createMockRequest("POST", url, {
+          authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+        });
         const res = createMockResponse();
 
         await handler(req, res);
 
-        // Should handle gracefully (either 400 or 404)
-        expect([400, 404]).toContain(res._statusCode);
+        // Should handle gracefully (either 400, 401, or 404)
+        expect([400, 401, 404]).toContain(res._statusCode);
       }
     });
 
@@ -274,10 +295,14 @@ describe("SSE Transport - Edge Cases", () => {
             res.end("{}");
           }),
         } as any,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
       });
 
       const encodedId = encodeURIComponent(specialId);
-      const req = createMockRequest("POST", `/messages?sessionId=${encodedId}`);
+      const req = createMockRequest("POST", `/messages?sessionId=${encodedId}`, {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -316,7 +341,9 @@ describe("SSE Transport - Edge Cases", () => {
       ];
 
       for (const { path, expectedCode } of normalizedPaths) {
-        const req = createMockRequest("GET", path);
+        const req = createMockRequest("GET", path, {
+          authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+        });
         const res = createMockResponse();
         await handler(req, res);
         // Valid endpoints should be accessible
@@ -381,6 +408,7 @@ describe("SSE Transport - Edge Cases", () => {
     it("should allow any origin by default", async () => {
       const req = createMockRequest("GET", "/sse", {
         origin: "https://example.com",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
       });
       const res = createMockResponse();
 
@@ -436,7 +464,9 @@ describe("SSE Transport - Edge Cases", () => {
   describe("Race Conditions", () => {
     it("should handle concurrent messages to same session", async () => {
       // Create a session
-      const sseReq = createMockRequest("GET", "/sse");
+      const sseReq = createMockRequest("GET", "/sse", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const sseRes = createMockResponse();
       await handler(sseReq, sseRes);
 
@@ -444,7 +474,9 @@ describe("SSE Transport - Edge Cases", () => {
 
       // Send multiple messages concurrently
       const messageRequests = Array.from({ length: 10 }, () => ({
-        req: createMockRequest("POST", `/messages?sessionId=${sessionId}`),
+        req: createMockRequest("POST", `/messages?sessionId=${sessionId}`, {
+          authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+        }),
         res: createMockResponse(),
       }));
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { EventEmitter } from "node:events";
-import { createHTTPRequestHandler } from "../../src/transports/http.js";
+import { createHTTPRequestHandler, type HTTPSession } from "../../src/transports/http.js";
 import { FizzyClient } from "../../src/client/fizzy-client.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SessionManager } from "../../src/utils/session-manager.js";
@@ -49,9 +49,12 @@ vi.mock("../../src/server.js", () => ({
 // Mock fetch for FizzyClient
 global.fetch = vi.fn();
 
+// Use env token if available, otherwise use test token
+const TEST_FIZZY_TOKEN = process.env.FIZZY_ACCESS_TOKEN || "test-fizzy-token";
+
 describe("HTTP Transport - Edge Cases", () => {
   let client: FizzyClient;
-  let sessionManager: SessionManager<StreamableHTTPServerTransport>;
+  let sessionManager: SessionManager<HTTPSession>;
   let handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
 
   beforeEach(() => {
@@ -63,12 +66,12 @@ describe("HTTP Transport - Edge Cases", () => {
       accessToken: "test-token",
       maxRetries: 0,
     });
-    sessionManager = new SessionManager<StreamableHTTPServerTransport>({
+    sessionManager = new SessionManager<HTTPSession>({
       maxSessions: 100,
       sessionTimeout: 30 * 60 * 1000,
       cleanupInterval: 0,
     });
-    handler = createHTTPRequestHandler(client, sessionManager, 3000);
+    handler = createHTTPRequestHandler(sessionManager, 3000);
   });
 
   afterEach(() => {
@@ -125,7 +128,9 @@ describe("HTTP Transport - Edge Cases", () => {
   describe("Session Management Bugs", () => {
     it("should handle multiple concurrent session initializations", async () => {
       const requests = Array.from({ length: 5 }, () => ({
-        req: createMockRequest("POST", "/mcp"),
+        req: createMockRequest("POST", "/mcp", {
+          authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+        }),
         res: createMockResponse(),
       }));
 
@@ -143,14 +148,18 @@ describe("HTTP Transport - Edge Cases", () => {
       // Add a mock session
       const sessionId = "test-session-123";
       sessionManager.create(sessionId, {
-        handleRequest: vi.fn().mockResolvedValue(undefined),
-      } as unknown as StreamableHTTPServerTransport);
+        transport: {
+          handleRequest: vi.fn().mockResolvedValue(undefined),
+        } as unknown as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
       // Try different header case variations
       const headerVariations = [
-        { "mcp-session-id": sessionId },
-        { "MCP-SESSION-ID": sessionId },
-        { "Mcp-Session-Id": sessionId },
+        { "mcp-session-id": sessionId, authorization: `Bearer ${TEST_FIZZY_TOKEN}` },
+        { "MCP-SESSION-ID": sessionId, authorization: `Bearer ${TEST_FIZZY_TOKEN}` },
+        { "Mcp-Session-Id": sessionId, authorization: `Bearer ${TEST_FIZZY_TOKEN}` },
       ];
 
       for (const headers of headerVariations) {
@@ -174,11 +183,16 @@ describe("HTTP Transport - Edge Cases", () => {
           res.end("{}");
         }),
       };
-      sessionManager.create(testSessionId, mockTransport as unknown as StreamableHTTPServerTransport);
+      sessionManager.create(testSessionId, {
+        transport: mockTransport as unknown as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
       const req = createMockRequest("POST", "/mcp", {
         "mcp-session-id": testSessionId,
         origin: "http://localhost:3000",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
       });
       const res = createMockResponse();
 
@@ -197,7 +211,9 @@ describe("HTTP Transport - Edge Cases", () => {
     });
 
     it("should call onsessionclosed callback when session is terminated", async () => {
-      const req = createMockRequest("POST", "/mcp");
+      const req = createMockRequest("POST", "/mcp", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -223,7 +239,9 @@ describe("HTTP Transport - Edge Cases", () => {
     });
 
     it("should handle /mcp with query parameters", async () => {
-      const req = createMockRequest("POST", "/mcp?debug=true");
+      const req = createMockRequest("POST", "/mcp?debug=true", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -244,6 +262,7 @@ describe("HTTP Transport - Edge Cases", () => {
       for (const sessionId of malformedIds) {
         const req = createMockRequest("GET", "/mcp", {
           "mcp-session-id": sessionId,
+          authorization: `Bearer ${TEST_FIZZY_TOKEN}`
         });
         const res = createMockResponse();
 
@@ -280,7 +299,9 @@ describe("HTTP Transport - Edge Cases", () => {
       ];
 
       for (const path of normalizedToMcp) {
-        const req = createMockRequest("POST", path);
+        const req = createMockRequest("POST", path, {
+          authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+        });
         const res = createMockResponse();
         await handler(req, res);
         // Creates a session successfully
@@ -364,6 +385,7 @@ describe("HTTP Transport - Edge Cases", () => {
     it("should allow any origin by default", async () => {
       const req = createMockRequest("POST", "/mcp", {
         origin: "https://example.com",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
       });
       const res = createMockResponse();
 
@@ -377,7 +399,9 @@ describe("HTTP Transport - Edge Cases", () => {
 
   describe("Protocol Compliance", () => {
     it("should return mcp-session-id header on new session creation", async () => {
-      const req = createMockRequest("POST", "/mcp");
+      const req = createMockRequest("POST", "/mcp", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -449,10 +473,17 @@ describe("HTTP Transport - Edge Cases", () => {
           res.end(`{"count":${requestCount.value}}`);
         }),
       };
-      sessionManager.create(sessionId, mockTransport as unknown as StreamableHTTPServerTransport);
+      sessionManager.create(sessionId, {
+        transport: mockTransport as unknown as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
       const requests = Array.from({ length: 10 }, () => ({
-        req: createMockRequest("POST", "/mcp", { "mcp-session-id": sessionId }),
+        req: createMockRequest("POST", "/mcp", {
+          "mcp-session-id": sessionId,
+          authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+        }),
         res: createMockResponse(),
       }));
 
@@ -477,11 +508,16 @@ describe("HTTP Transport - Edge Cases", () => {
           res.end();
         }),
       };
-      sessionManager.create(sessionId, mockTransport as unknown as StreamableHTTPServerTransport);
+      sessionManager.create(sessionId, {
+        transport: mockTransport as unknown as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
       // Start GET stream
       const getReq = createMockRequest("GET", "/mcp", {
         "mcp-session-id": sessionId,
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
       });
       const getRes = createMockResponse();
       const streamPromise = handler(getReq, getRes);
@@ -497,7 +533,9 @@ describe("HTTP Transport - Edge Cases", () => {
     it("should handle rapid session create/delete cycles", async () => {
       for (let i = 0; i < 10; i++) {
         // Create session
-        const createReq = createMockRequest("POST", "/mcp");
+        const createReq = createMockRequest("POST", "/mcp", {
+          authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+        });
         const createRes = createMockResponse();
         await handler(createReq, createRes);
 
@@ -509,6 +547,7 @@ describe("HTTP Transport - Edge Cases", () => {
           // Delete session
           const deleteReq = createMockRequest("DELETE", "/mcp", {
             "mcp-session-id": sessionId,
+            authorization: `Bearer ${TEST_FIZZY_TOKEN}`
           });
           const deleteRes = createMockResponse();
           await handler(deleteReq, deleteRes);

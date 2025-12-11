@@ -1,16 +1,16 @@
 /**
  * Security utilities for MCP transport servers
  * Implements MCP security requirements for HTTP/SSE transports
- * 
+ *
  * Security Layers:
  * 1. Localhost binding (default) - Prevents remote network access
  * 2. Origin validation - Controls which web origins can connect via CORS
  * 3. Client Authentication - Bearer token to authenticate MCP clients connecting to this server
- * 
- * Note: Client Authentication (MCP_AUTH_TOKEN) is separate from User Authentication
- * (FIZZY_ACCESS_TOKEN). User Authentication is always required and handled by the
- * FizzyClient to identify the user and access their Fizzy data.
- * 
+ * 4. User Authentication - Per-user Fizzy tokens for multi-user support
+ *
+ * Note: Client Authentication (MCP_AUTH_TOKEN) is separate from User Authentication.
+ * User Authentication uses per-user Fizzy tokens sent via Authorization header.
+ *
  * Environment Variables:
  * - MCP_ALLOWED_ORIGINS: Comma-separated list of allowed origins (or "*" for all)
  * - MCP_AUTH_TOKEN: Bearer token for MCP client authentication
@@ -318,3 +318,22 @@ export function getBindAddress(options: SecurityOptions = {}): string {
   return resolved.localhostOnly !== false ? "127.0.0.1" : "0.0.0.0";
 }
 
+/**
+ * Extract Fizzy token from request headers for user authentication
+ * Supports: Authorization: Bearer <token>
+ *
+ * This is used for multi-user support where each user provides their own
+ * Fizzy Personal Access Token.
+ *
+ * @param req - HTTP request
+ * @returns Fizzy token or null if not found
+ */
+export function extractFizzyToken(req: IncomingMessage): string | null {
+  const authHeader = req.headers.authorization;
+
+  if (authHeader?.startsWith("Bearer ")) {
+    return authHeader.slice(7);
+  }
+
+  return null;
+}

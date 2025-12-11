@@ -30,6 +30,10 @@ vi.mock("../../src/server.js", () => ({
 // Mock fetch for FizzyClient
 global.fetch = vi.fn();
 
+// Test Fizzy access token
+// Use env token if available, otherwise use test token
+const TEST_FIZZY_TOKEN = process.env.FIZZY_ACCESS_TOKEN || "test-fizzy-token";
+
 describe("SSE Transport", () => {
   let client: FizzyClient;
   let sessionManager: SessionManager<SSESession>;
@@ -46,7 +50,7 @@ describe("SSE Transport", () => {
       sessionTimeout: 30 * 60 * 1000,
       cleanupInterval: 0, // Disable auto-cleanup in tests
     });
-    handler = createSSERequestHandler(client, sessionManager, 3000);
+    handler = createSSERequestHandler(sessionManager, 3000);
   });
 
   afterEach(() => {
@@ -154,7 +158,10 @@ describe("SSE Transport", () => {
     });
 
     it("should allow any origin by default", async () => {
-      const req = createMockRequest("GET", "/sse", { origin: "https://any-origin.com" });
+      const req = createMockRequest("GET", "/sse", {
+        origin: "https://any-origin.com",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -165,7 +172,7 @@ describe("SSE Transport", () => {
     });
 
     it("should reject non-allowed origins when explicitly configured", async () => {
-      const restrictedHandler = createSSERequestHandler(client, sessionManager, 3000, {
+      const restrictedHandler = createSSERequestHandler(sessionManager, 3000, {
         allowedOrigins: ["http://localhost:3000"],
       });
       const req = createMockRequest("GET", "/sse", { origin: "https://evil.com" });
@@ -182,7 +189,7 @@ describe("SSE Transport", () => {
     let secureHandler: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
 
     beforeEach(() => {
-      secureHandler = createSSERequestHandler(client, sessionManager, 3000, {
+      secureHandler = createSSERequestHandler(sessionManager, 3000, {
         authToken: "test-secret-token",
       });
     });
@@ -225,7 +232,9 @@ describe("SSE Transport", () => {
 
   describe("SSE Connection Endpoint (GET /sse)", () => {
     it("should create a new session on GET /sse", async () => {
-      const req = createMockRequest("GET", "/sse");
+      const req = createMockRequest("GET", "/sse", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -235,7 +244,9 @@ describe("SSE Transport", () => {
     });
 
     it("should clean up session on disconnect", async () => {
-      const req = createMockRequest("GET", "/sse");
+      const req = createMockRequest("GET", "/sse", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -279,9 +290,15 @@ describe("SSE Transport", () => {
           res.end('{"jsonrpc":"2.0","id":1,"result":{}}');
         }),
       };
-      sessionManager.create("valid-session-id", { transport: mockTransport as any });
+      sessionManager.create("valid-session-id", {
+        transport: mockTransport as any,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
-      const req = createMockRequest("POST", "/messages?sessionId=valid-session-id");
+      const req = createMockRequest("POST", "/messages?sessionId=valid-session-id", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -330,7 +347,7 @@ describe("SSE Transport", () => {
         sessionTimeout: 30 * 60 * 1000,
         cleanupInterval: 0,
       });
-      limitedHandler = createSSERequestHandler(client, limitedSessionManager, 3000);
+      limitedHandler = createSSERequestHandler(limitedSessionManager, 3000);
     });
 
     afterEach(() => {
@@ -339,10 +356,20 @@ describe("SSE Transport", () => {
 
     it("should return 503 when session limit is reached", async () => {
       // Fill up all available sessions
-      limitedSessionManager.create("session-1", { transport: {} as any });
-      limitedSessionManager.create("session-2", { transport: {} as any });
+      limitedSessionManager.create("session-1", {
+        transport: {} as any,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
+      limitedSessionManager.create("session-2", {
+        transport: {} as any,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
-      const req = createMockRequest("GET", "/sse");
+      const req = createMockRequest("GET", "/sse", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await limitedHandler(req, res);
@@ -356,10 +383,20 @@ describe("SSE Transport", () => {
     });
 
     it("should include Retry-After header on 503", async () => {
-      limitedSessionManager.create("session-1", { transport: {} as any });
-      limitedSessionManager.create("session-2", { transport: {} as any });
+      limitedSessionManager.create("session-1", {
+        transport: {} as any,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
+      limitedSessionManager.create("session-2", {
+        transport: {} as any,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
-      const req = createMockRequest("GET", "/sse");
+      const req = createMockRequest("GET", "/sse", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await limitedHandler(req, res);
@@ -378,10 +415,16 @@ describe("SSE Transport", () => {
     });
 
     it("should allow new sessions when below limit", async () => {
-      limitedSessionManager.create("session-1", { transport: {} as any });
+      limitedSessionManager.create("session-1", {
+        transport: {} as any,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
       // Only 1 session, limit is 2
 
-      const req = createMockRequest("GET", "/sse");
+      const req = createMockRequest("GET", "/sse", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await limitedHandler(req, res);
@@ -393,10 +436,20 @@ describe("SSE Transport", () => {
 
     it("should allow messages to existing sessions when at limit", async () => {
       const mockTransport = { handlePostMessage: vi.fn().mockResolvedValue(undefined) };
-      limitedSessionManager.create("session-1", { transport: {} as any });
-      limitedSessionManager.create("session-2", { transport: mockTransport as any });
+      limitedSessionManager.create("session-1", {
+        transport: {} as any,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
+      limitedSessionManager.create("session-2", {
+        transport: mockTransport as any,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
-      const req = createMockRequest("POST", "/messages?sessionId=session-2");
+      const req = createMockRequest("POST", "/messages?sessionId=session-2", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await limitedHandler(req, res);

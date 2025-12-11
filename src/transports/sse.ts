@@ -1,11 +1,17 @@
 /**
  * SSE Transport Handler
  * Creates an HTTP server that handles Server-Sent Events connections
- * 
+ *
+ * Multi-User Support:
+ * - Each user provides their own Fizzy token via Authorization: Bearer <token> header
+ * - Each session gets its own FizzyClient instance with the user's token
+ * - Sessions are isolated - users cannot access each other's data
+ *
  * Security Features:
  * - Origin header validation (DNS rebinding protection)
  * - Localhost-only binding by default
- * - Optional Bearer token authentication
+ * - Per-user authentication via Authorization header
+ * - Optional client authentication (MCP_AUTH_TOKEN)
  * - Custom authorization support
  * - Secure CORS configuration
  */
@@ -22,15 +28,19 @@ import {
   sendSecurityError,
   setSecureCorsHeaders,
   getBindAddress,
+  extractFizzyToken,
 } from "../utils/security.js";
 
 export interface SSESession {
   transport: SSEServerTransport;
+  client: FizzyClient;
+  fizzyToken: string;
 }
 
 export interface SSETransportOptions {
   port: number;
-  client: FizzyClient;
+  /** @deprecated No longer used - each session creates its own client with user's token */
+  client?: FizzyClient;
   /** Maximum concurrent sessions (default: 1000) */
   maxSessions?: number;
   /** Session idle timeout in ms (default: 30 minutes) */
@@ -50,7 +60,6 @@ export interface SSETransportServer {
  * Exported for testing
  */
 export function createSSERequestHandler(
-  client: FizzyClient,
   sessionManager: SessionManager<SSESession>,
   port: number,
   security: SecurityOptions = {}
@@ -96,37 +105,60 @@ export function createSSERequestHandler(
     // SSE connection endpoint - GET /sse
     if (url.pathname === "/sse" && req.method === "GET") {
       log.debug("New SSE connection request");
-      
+
+      // Extract user's Fizzy token from Authorization header
+      const fizzyToken = extractFizzyToken(req);
+      if (!fizzyToken) {
+        log.warn("Missing Fizzy token in Authorization header");
+        setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          error: "Authorization required",
+          message: "Please provide your Fizzy Personal Access Token via: Authorization: Bearer <token>",
+        }));
+        return;
+      }
+
       // Check if we can create a new session
       if (sessionManager.size >= sessionManager.maxSessions) {
         // Try to clean up expired sessions first
         sessionManager.cleanup();
-        
+
         // Still at capacity after cleanup?
         if (sessionManager.size >= sessionManager.maxSessions) {
           log.warn("Server at capacity, rejecting new SSE connection");
-          res.writeHead(503, { 
+          setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
+          res.writeHead(503, {
             "Content-Type": "application/json",
             "Retry-After": "60",
           });
-          res.end(JSON.stringify({ 
+          res.end(JSON.stringify({
             error: "Server at capacity",
             message: "Maximum number of concurrent sessions reached. Please try again later.",
           }));
           return;
         }
       }
-      
-      // Create new server instance for this session
-      const server = createFizzyServer(client);
-      
+
+      // Create per-user FizzyClient with the user's token
+      const userClient = new FizzyClient({
+        accessToken: fizzyToken,
+      });
+
+      // Create new server instance for this session with user's client
+      const server = createFizzyServer(userClient);
+
       // Create SSE transport with the endpoint for POST messages
       const transport = new SSEServerTransport("/messages", res);
-      
+
       log.info(`SSE session created: ${transport.sessionId}`);
-      
-      // Store the session using SessionManager
-      sessionManager.create(transport.sessionId, { transport });
+
+      // Store the session with client and token for validation
+      sessionManager.create(transport.sessionId, {
+        transport,
+        client: userClient,
+        fizzyToken,
+      });
 
       // Clean up on disconnect
       res.on("close", () => {
@@ -134,11 +166,8 @@ export function createSSERequestHandler(
         sessionManager.delete(transport.sessionId);
       });
 
-      // Connect server to transport
+      // Connect server to transport - this also starts the SSE stream
       await server.connect(transport);
-      
-      // Start the SSE stream
-      await transport.start();
       return;
     }
 
@@ -146,6 +175,7 @@ export function createSSERequestHandler(
     if (url.pathname === "/messages" && req.method === "POST") {
       if (!sessionId) {
         log.warn("Message request without sessionId");
+        setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Missing sessionId parameter" }));
         return;
@@ -155,13 +185,27 @@ export function createSSERequestHandler(
       const session = sessionManager.get(sessionId);
       if (!session) {
         log.warn(`Session not found: ${sessionId}`);
+        setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Session not found" }));
         return;
       }
 
+      // Validate token matches the session
+      const requestToken = extractFizzyToken(req);
+      if (requestToken !== session.fizzyToken) {
+        log.warn(`Token mismatch for session: ${sessionId}`);
+        setSecureCorsHeaders(res, securityResult.corsOrigin || "*");
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          error: "Token mismatch",
+          message: "The Authorization token does not match the session",
+        }));
+        return;
+      }
+
       log.debug(`Handling message for session: ${sessionId}`);
-      
+
       // Handle the POST message
       await session.transport.handlePostMessage(req, res);
       return;
@@ -177,9 +221,9 @@ export function createSSERequestHandler(
  * Create SSE transport server
  */
 export function createSSETransportServer(options: SSETransportOptions): SSETransportServer {
-  const { port, client, maxSessions, sessionTimeout, security = {} } = options;
+  const { port, maxSessions, sessionTimeout, security = {} } = options;
   const log = logger.child("sse");
-  
+
   const sessionManager = new SessionManager<SSESession>({
     maxSessions: maxSessions ?? 1000,
     sessionTimeout: sessionTimeout ?? 30 * 60 * 1000, // 30 minutes
@@ -187,8 +231,8 @@ export function createSSETransportServer(options: SSETransportOptions): SSETrans
       log.info(`Session evicted (${reason}): ${sessionId}`);
     },
   });
-  
-  const handler = createSSERequestHandler(client, sessionManager, port, security);
+
+  const handler = createSSERequestHandler(sessionManager, port, security);
   const server = createServer(handler);
 
   return {
@@ -248,7 +292,24 @@ export async function startSSETransport(options: SSETransportOptions): Promise<S
         }
       }
 
+      // Log multi-user authentication info
+      log.info("Multi-user support: Each user provides their own Fizzy token via Authorization header");
+
       resolve(transportServer);
     });
+  });
+}
+
+/**
+ * Convenience function for starting SSE transport with security options from environment
+ */
+export async function startSecureSSETransport(
+  options: Omit<SSETransportOptions, "security" | "client">
+): Promise<SSETransportServer> {
+  return startSSETransport({
+    ...options,
+    security: {
+      // Security options are read from environment variables automatically
+    },
   });
 }

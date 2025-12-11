@@ -38,6 +38,10 @@ vi.mock("../../src/server.js", () => ({
 // Mock fetch for FizzyClient
 global.fetch = vi.fn();
 
+// Test Fizzy access token
+// Use env token if available, otherwise use test token
+const TEST_FIZZY_TOKEN = process.env.FIZZY_ACCESS_TOKEN || "test-fizzy-token";
+
 describe("HTTP Transport", () => {
   let client: FizzyClient;
   let sessionManager: SessionManager<StreamableHTTPServerTransport>;
@@ -54,7 +58,7 @@ describe("HTTP Transport", () => {
       sessionTimeout: 30 * 60 * 1000,
       cleanupInterval: 0, // Disable auto-cleanup in tests
     });
-    handler = createHTTPRequestHandler(client, sessionManager, 3000);
+    handler = createHTTPRequestHandler(sessionManager, 3000);
   });
 
   afterEach(() => {
@@ -171,7 +175,10 @@ describe("HTTP Transport", () => {
     });
 
     it("should allow any origin by default", async () => {
-      const req = createMockRequest("POST", "/mcp", { origin: "https://any-origin.com" });
+      const req = createMockRequest("POST", "/mcp", {
+        origin: "https://any-origin.com",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -182,7 +189,7 @@ describe("HTTP Transport", () => {
     });
 
     it("should reject non-allowed origins when explicitly configured", async () => {
-      const restrictedHandler = createHTTPRequestHandler(client, sessionManager, 3000, {
+      const restrictedHandler = createHTTPRequestHandler(sessionManager, 3000, {
         allowedOrigins: ["http://localhost:3000"],
       });
       const req = createMockRequest("POST", "/mcp", { origin: "https://evil.com" });
@@ -199,7 +206,7 @@ describe("HTTP Transport", () => {
     let secureHandler: (req: IncomingMessage, res: ServerResponse) => Promise<void>;
 
     beforeEach(() => {
-      secureHandler = createHTTPRequestHandler(client, sessionManager, 3000, {
+      secureHandler = createHTTPRequestHandler(sessionManager, 3000, {
         authToken: "test-secret-token",
       });
     });
@@ -255,7 +262,9 @@ describe("HTTP Transport", () => {
 
   describe("MCP Endpoint - POST /mcp", () => {
     it("should create new session when no session ID provided", async () => {
-      const req = createMockRequest("POST", "/mcp");
+      const req = createMockRequest("POST", "/mcp", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await handler(req, res);
@@ -269,10 +278,15 @@ describe("HTTP Transport", () => {
       const mockTransport = {
         handleRequest: vi.fn().mockResolvedValue(undefined),
       };
-      sessionManager.create("existing-session", mockTransport as unknown as StreamableHTTPServerTransport);
+      sessionManager.create("existing-session", {
+        transport: mockTransport as unknown as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
       const req = createMockRequest("POST", "/mcp", {
         "mcp-session-id": "existing-session",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
       });
       const res = createMockResponse();
 
@@ -286,6 +300,7 @@ describe("HTTP Transport", () => {
     it("should create new session for unknown session ID", async () => {
       const req = createMockRequest("POST", "/mcp", {
         "mcp-session-id": "unknown-session",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
       });
       const res = createMockResponse();
 
@@ -323,10 +338,15 @@ describe("HTTP Transport", () => {
       const mockTransport = {
         handleRequest: vi.fn().mockResolvedValue(undefined),
       };
-      sessionManager.create("valid-session", mockTransport as unknown as StreamableHTTPServerTransport);
+      sessionManager.create("valid-session", {
+        transport: mockTransport as unknown as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
       const req = createMockRequest("GET", "/mcp", {
         "mcp-session-id": "valid-session",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
       });
       const res = createMockResponse();
 
@@ -363,10 +383,15 @@ describe("HTTP Transport", () => {
       const mockTransport = {
         handleRequest: vi.fn().mockResolvedValue(undefined),
       };
-      sessionManager.create("valid-session", mockTransport as unknown as StreamableHTTPServerTransport);
+      sessionManager.create("valid-session", {
+        transport: mockTransport as unknown as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
       const req = createMockRequest("DELETE", "/mcp", {
         "mcp-session-id": "valid-session",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
       });
       const res = createMockResponse();
 
@@ -449,7 +474,7 @@ describe("HTTP Transport", () => {
         sessionTimeout: 30 * 60 * 1000,
         cleanupInterval: 0,
       });
-      limitedHandler = createHTTPRequestHandler(client, limitedSessionManager, 3000);
+      limitedHandler = createHTTPRequestHandler(limitedSessionManager, 3000);
     });
 
     afterEach(() => {
@@ -458,11 +483,21 @@ describe("HTTP Transport", () => {
 
     it("should return 503 when session limit is reached", async () => {
       // Fill up all available sessions
-      limitedSessionManager.create("session-1", {} as StreamableHTTPServerTransport);
-      limitedSessionManager.create("session-2", {} as StreamableHTTPServerTransport);
+      limitedSessionManager.create("session-1", {
+        transport: {} as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
+      limitedSessionManager.create("session-2", {
+        transport: {} as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
       // Try to create a new session
-      const req = createMockRequest("POST", "/mcp");
+      const req = createMockRequest("POST", "/mcp", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await limitedHandler(req, res);
@@ -476,10 +511,20 @@ describe("HTTP Transport", () => {
     });
 
     it("should include Retry-After header on 503", async () => {
-      limitedSessionManager.create("session-1", {} as StreamableHTTPServerTransport);
-      limitedSessionManager.create("session-2", {} as StreamableHTTPServerTransport);
+      limitedSessionManager.create("session-1", {
+        transport: {} as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
+      limitedSessionManager.create("session-2", {
+        transport: {} as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
-      const req = createMockRequest("POST", "/mcp");
+      const req = createMockRequest("POST", "/mcp", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await limitedHandler(req, res);
@@ -498,10 +543,16 @@ describe("HTTP Transport", () => {
     });
 
     it("should allow new sessions when existing ones are below limit", async () => {
-      limitedSessionManager.create("session-1", {} as StreamableHTTPServerTransport);
+      limitedSessionManager.create("session-1", {
+        transport: {} as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
       // Only 1 session, limit is 2
 
-      const req = createMockRequest("POST", "/mcp");
+      const req = createMockRequest("POST", "/mcp", {
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await limitedHandler(req, res);
@@ -514,11 +565,22 @@ describe("HTTP Transport", () => {
     it("should allow using existing sessions when at limit", async () => {
       // Fill up sessions
       const mockTransport = { handleRequest: vi.fn().mockResolvedValue(undefined) };
-      limitedSessionManager.create("session-1", {} as StreamableHTTPServerTransport);
-      limitedSessionManager.create("session-2", mockTransport as unknown as StreamableHTTPServerTransport);
+      limitedSessionManager.create("session-1", {
+        transport: {} as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
+      limitedSessionManager.create("session-2", {
+        transport: mockTransport as unknown as StreamableHTTPServerTransport,
+        client: new FizzyClient({ accessToken: TEST_FIZZY_TOKEN }),
+        fizzyToken: TEST_FIZZY_TOKEN
+      });
 
       // Request with existing session ID should work
-      const req = createMockRequest("POST", "/mcp", { "mcp-session-id": "session-2" });
+      const req = createMockRequest("POST", "/mcp", {
+        "mcp-session-id": "session-2",
+        authorization: `Bearer ${TEST_FIZZY_TOKEN}`
+      });
       const res = createMockResponse();
 
       await limitedHandler(req, res);

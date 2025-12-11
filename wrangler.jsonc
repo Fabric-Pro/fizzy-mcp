@@ -1,0 +1,54 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fizzy-mcp",
+  "main": "src/cloudflare/index.ts",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Environment variables (non-secret defaults)
+  "vars": {
+    "FIZZY_BASE_URL": "https://app.fizzy.do",
+    "LOG_LEVEL": "info"
+  },
+
+  // Durable Objects for session management
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MCP_SESSIONS",
+        "class_name": "McpSessionDO"
+      }
+    ]
+  },
+
+  // Migrations for Durable Objects
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["McpSessionDO"]
+    }
+  ],
+
+  // Development settings
+  "dev": {
+    "port": 8787,
+    "local_protocol": "http"
+  },
+
+  // Production environment overrides
+  "env": {
+    "production": {
+      "name": "fizzy-mcp-production",
+      "vars": {
+        "LOG_LEVEL": "warn"
+      }
+    },
+    "staging": {
+      "name": "fizzy-mcp-staging",
+      "vars": {
+        "LOG_LEVEL": "debug"
+      }
+    }
+  }
+}
+

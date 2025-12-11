@@ -55,33 +55,36 @@ Options:
   -h, --help              Show this help message
 
 Environment Variables:
-  FIZZY_ACCESS_TOKEN      Your Fizzy API access token (required)
+  FIZZY_ACCESS_TOKEN      Your Fizzy API access token (required for stdio only)
   FIZZY_BASE_URL          Fizzy API base URL (default: https://app.fizzy.do)
   PORT                    Server port for HTTP/SSE (default: 3000)
   MCP_TRANSPORT           Default transport type (default: stdio)
 
 Security (HTTP/SSE transports):
   MCP_ALLOWED_ORIGINS     Allowed CORS origins (comma-separated, or "*" for all)
-  MCP_AUTH_TOKEN          Bearer token for client authentication
+  MCP_AUTH_TOKEN          Bearer token for client authentication (optional)
   MCP_BIND_ALL_INTERFACES Set to "true" to bind to 0.0.0.0 (not recommended)
+
+Multi-User Support (HTTP/SSE):
+  HTTP and SSE transports support multiple users simultaneously.
+  Each user provides their own Fizzy token via Authorization header:
+    Authorization: Bearer <user-fizzy-token>
 
 Examples:
   # Run with stdio transport (for Cursor, VS Code, Claude Desktop)
   FIZZY_ACCESS_TOKEN=your-token fizzy-mcp
 
-  # Run with SSE transport
-  FIZZY_ACCESS_TOKEN=your-token fizzy-mcp --transport sse --port 3000
+  # Run with SSE transport (multi-user, tokens via Authorization header)
+  fizzy-mcp --transport sse --port 3000
 
-  # Run with Streamable HTTP transport
-  FIZZY_ACCESS_TOKEN=your-token fizzy-mcp --transport http --port 3000
+  # Run with Streamable HTTP transport (multi-user)
+  fizzy-mcp --transport http --port 3000
 
   # Run with restricted CORS origins
-  MCP_ALLOWED_ORIGINS="http://localhost:3000" \\
-  FIZZY_ACCESS_TOKEN=your-token fizzy-mcp --transport http
+  MCP_ALLOWED_ORIGINS="http://localhost:3000" fizzy-mcp --transport http
 
-  # Run with client authentication
-  MCP_AUTH_TOKEN="my-secret" \\
-  FIZZY_ACCESS_TOKEN=your-token fizzy-mcp --transport http
+  # Run with client authentication (optional, restricts MCP client access)
+  MCP_AUTH_TOKEN="my-secret" fizzy-mcp --transport http
 `);
       process.exit(0);
     }
@@ -90,10 +93,11 @@ Examples:
   return { transport, port };
 }
 
-// Validate configuration
-function validateConfig(): void {
-  if (!CONFIG.accessToken) {
-    console.error("Error: FIZZY_ACCESS_TOKEN environment variable is required");
+// Validate configuration for stdio transport only
+// HTTP/SSE transports use per-user tokens via Authorization header
+function validateConfig(transport: string): void {
+  if (transport === "stdio" && !CONFIG.accessToken) {
+    console.error("Error: FIZZY_ACCESS_TOKEN environment variable is required for stdio transport");
     console.error("Get your access token from your Fizzy profile > API > Personal access tokens");
     process.exit(1);
   }
@@ -121,11 +125,8 @@ async function startStdioTransport(): Promise<void> {
 
 // Start SSE transport - for web-based clients (uses secure transport)
 async function startSSETransport(port: number): Promise<void> {
-  const client = createClient();
-  
   const server = await startSecureSSETransport({
     port,
-    client,
     // Security options are read from environment variables automatically
   });
 
@@ -133,6 +134,7 @@ async function startSSETransport(port: number): Promise<void> {
   console.error(`  SSE endpoint: http://localhost:${port}/sse`);
   console.error(`  Message endpoint: http://localhost:${port}/messages`);
   console.error(`  Health check: http://localhost:${port}/health`);
+  console.error(`  Multi-user: Each user provides their own Fizzy token via Authorization header`);
 
   // Handle graceful shutdown
   process.on("SIGINT", async () => {
@@ -144,17 +146,15 @@ async function startSSETransport(port: number): Promise<void> {
 
 // Start Streamable HTTP transport - for scalable deployments (uses secure transport)
 async function startHTTPTransport(port: number): Promise<void> {
-  const client = createClient();
-  
   const server = await startSecureHTTPTransport({
     port,
-    client,
     // Security options are read from environment variables automatically
   });
 
   console.error("Fizzy MCP Server running on Streamable HTTP");
   console.error(`  MCP endpoint: http://localhost:${port}/mcp`);
   console.error(`  Health check: http://localhost:${port}/health`);
+  console.error(`  Multi-user: Each user provides their own Fizzy token via Authorization header`);
 
   // Handle graceful shutdown
   process.on("SIGINT", async () => {
@@ -167,7 +167,7 @@ async function startHTTPTransport(port: number): Promise<void> {
 // Main entry point
 async function main(): Promise<void> {
   const { transport, port } = parseArgs();
-  validateConfig();
+  validateConfig(transport);
 
   switch (transport.toLowerCase()) {
     case "stdio":

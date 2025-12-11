@@ -41,3 +41,6 @@ temp/
 # yarn.lock
 # pnpm-lock.yaml
 
+# Cloudflare Wrangler local development files
+.dev.vars
+.wrangler/

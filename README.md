@@ -59,7 +59,7 @@ Get up and running in 3 steps:
 
 2. **Run with npx** (no installation needed):
    ```bash
-   FIZZY_ACCESS_TOKEN="your-token-here" npx fizzy-mcp
+   FIZZY_AFICCESS_TOKEN="your-token-here" npx fizzy-mcp
    ```
 
 3. **Configure your IDE** (e.g., Cursor):
@@ -241,22 +241,61 @@ FIZZY_ACCESS_TOKEN="your-token" fizzy-mcp
 ### SSE Transport (for web clients)
 
 ```bash
-FIZZY_ACCESS_TOKEN="your-token" npx fizzy-mcp --transport sse --port 3000
+# Start the server (no FIZZY_ACCESS_TOKEN needed - users provide their own)
+npx fizzy-mcp --transport sse --port 3000
 
 # Endpoints:
 #   SSE: http://localhost:3000/sse
 #   Messages: http://localhost:3000/messages
 ```
 
+**Connecting clients:**
+```bash
+# Each user provides their own Fizzy token via Authorization header
+curl -H "Authorization: Bearer YOUR_FIZZY_TOKEN" \
+     http://localhost:3000/sse
+```
+
 ### Streamable HTTP Transport (for production)
 
 ```bash
-FIZZY_ACCESS_TOKEN="your-token" npx fizzy-mcp --transport http --port 3000
+# Start the server (no FIZZY_ACCESS_TOKEN needed - users provide their own)
+npx fizzy-mcp --transport http --port 3000
 
 # Endpoints:
 #   MCP: http://localhost:3000/mcp
 #   Health: http://localhost:3000/health
 ```
+
+**Connecting clients:**
+```bash
+# Each user provides their own Fizzy token via Authorization header
+curl -X POST \
+     -H "Authorization: Bearer YOUR_FIZZY_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+     http://localhost:3000/mcp
+```
+
+### Cloudflare Workers (for edge deployment)
+
+Deploy to Cloudflare Workers for global distribution with near-zero cold starts:
+
+```bash
+# Install dependencies
+npm install
+
+# Login to Cloudflare
+npx wrangler login
+
+# Set your Fizzy access token
+npx wrangler secret put FIZZY_ACCESS_TOKEN
+
+# Deploy
+npm run cf:deploy
+```
+
+See the [Cloudflare Deployment Guide](docs/CLOUDFLARE.md) for detailed instructions.
 
 ---
 
@@ -280,33 +319,45 @@ When using HTTP or SSE transports, additional security options are available:
 | `MCP_AUTH_TOKEN` | No | — | Bearer token for Client Authentication (authenticates MCP clients) |
 | `MCP_BIND_ALL_INTERFACES` | No | `false` | Set to `true` to bind to 0.0.0.0 instead of localhost |
 
+**Multi-User Support:**
+
+SSE and HTTP transports support multiple users simultaneously:
+- Each user provides their own Fizzy Personal Access Token via `Authorization: Bearer <token>` header
+- Each session is isolated with its own FizzyClient instance
+- Users cannot access each other's data
+- Sessions timeout after 30 minutes of inactivity
+
 **Security Model:**
 - **Localhost binding** (default): Server binds to `127.0.0.1`, preventing remote access
 - **CORS origins**: Controls which web origins can connect (default: all)
+- **User Authentication**: Each user provides their own Fizzy token via Authorization header
 - **Client Authentication**: Optional bearer token to authenticate MCP clients connecting to this server
 
 ```bash
 # Basic usage (binds to localhost, allows all CORS origins)
-FIZZY_ACCESS_TOKEN="your-token" npx fizzy-mcp --transport http --port 3000
+# Users provide their own tokens via Authorization header
+npx fizzy-mcp --transport http --port 3000
 
 # Restrict CORS to specific origins
 MCP_ALLOWED_ORIGINS="http://localhost:3000,https://myapp.com" \
-FIZZY_ACCESS_TOKEN="your-token" npx fizzy-mcp --transport http --port 3000
+npx fizzy-mcp --transport http --port 3000
 
 # Enable Client Authentication (require MCP clients to provide a bearer token)
 MCP_AUTH_TOKEN="my-secret-token" \
-FIZZY_ACCESS_TOKEN="your-token" npx fizzy-mcp --transport http --port 3000
+npx fizzy-mcp --transport http --port 3000
 
 # For Docker/remote access (use with restricted origins and client auth)
 MCP_BIND_ALL_INTERFACES=true \
 MCP_ALLOWED_ORIGINS="https://myapp.com" \
 MCP_AUTH_TOKEN="my-secret-token" \
-FIZZY_ACCESS_TOKEN="your-token" npx fizzy-mcp --transport http --port 3000
+npx fizzy-mcp --transport http --port 3000
 ```
 
 > ⚠️ **Authentication Types:**
-> - **User Authentication** (`FIZZY_ACCESS_TOKEN`): Always required. Identifies the user and authenticates requests to the Fizzy API.
+> - **User Authentication** (via `Authorization` header): Required for SSE/HTTP transports. Each user provides their own Fizzy Personal Access Token.
 > - **Client Authentication** (`MCP_AUTH_TOKEN`): Optional. Authenticates MCP clients (like IDE extensions) connecting to this server.
+>
+> **Note:** For stdio transport, use `FIZZY_ACCESS_TOKEN` environment variable (single-user mode for CLI/IDE integrations).
 
 ---
 
@@ -471,6 +522,7 @@ Yes! You can configure multiple MCP server instances in your IDE, each with a di
 - **stdio** (default): For IDE integration (Cursor, VS Code, Claude Desktop). Communication happens via standard input/output.
 - **sse**: For web clients that need server-sent events. Runs an HTTP server with SSE endpoints.
 - **http**: For production deployments. Runs an HTTP server with streamable endpoints and health checks.
+- **cloudflare**: For edge deployment. Uses Cloudflare Workers with Durable Objects for session management. Provides global distribution, auto-scaling, and near-zero cold starts.
 
 ### Does this work offline?
 No, the server requires an internet connection to communicate with Fizzy's API at `app.fizzy.do`.
@@ -488,7 +540,9 @@ The server includes automatic retry logic with exponential backoff for rate limi
 The server automatically caches GET requests using ETags. When you request the same resource again, it sends the ETag to Fizzy's API. If the resource hasn't changed, Fizzy returns a 304 Not Modified response, saving bandwidth and improving speed.
 
 ### Can I use this in production?
-Yes! Use the HTTP transport mode with proper security settings (`MCP_AUTH_TOKEN`, `MCP_ALLOWED_ORIGINS`, and consider `MCP_BIND_ALL_INTERFACES` for Docker deployments).
+Yes! You have two options:
+1. **Self-hosted**: Use the HTTP transport mode with proper security settings (`MCP_AUTH_TOKEN`, `MCP_ALLOWED_ORIGINS`, and consider `MCP_BIND_ALL_INTERFACES` for Docker deployments).
+2. **Cloudflare Workers**: Deploy to the edge for global distribution, automatic scaling, and near-zero cold starts. See the [Cloudflare Deployment Guide](docs/CLOUDFLARE.md).
 
 ### Where can I find the Fizzy API documentation?
 Official Fizzy API docs: [github.com/basecamp/fizzy/blob/main/docs/API.md](https://github.com/basecamp/fizzy/blob/main/docs/API.md)

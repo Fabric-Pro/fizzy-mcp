@@ -14,17 +14,25 @@
     "start:stdio": "node dist/index.js --transport stdio",
     "start:sse": "node dist/index.js --transport sse",
     "start:http": "node dist/index.js --transport http",
-    "test": "vitest run --exclude '**/integration/**'",
-    "test:watch": "vitest --exclude '**/integration/**'",
+    "test": "vitest run --exclude '**/integration/**' --exclude '**/cloudflare/**'",
+    "test:watch": "vitest --exclude '**/integration/**' --exclude '**/cloudflare/**'",
     "test:integration": "vitest run tests/integration/",
+    "test:cloudflare": "vitest run tests/cloudflare/",
     "test:all": "vitest run",
     "test:coverage": "vitest run --coverage --exclude '**/integration/**'",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
+    "typecheck:cf": "tsc --noEmit -p tsconfig.cloudflare.json",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build && npm run test",
     "link:global": "npm run build && npm link",
-    "unlink:global": "npm unlink -g fizzy-mcp"
+    "unlink:global": "npm unlink -g fizzy-mcp",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy",
+    "cf:deploy:staging": "wrangler deploy --env staging",
+    "cf:deploy:production": "wrangler deploy --env production",
+    "cf:tail": "wrangler tail",
+    "cf:secret": "wrangler secret put FIZZY_ACCESS_TOKEN"
   },
   "keywords": [
     "mcp",
@@ -52,11 +60,14 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241205.0",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.0",
+    "dotenv": "^17.2.3",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "wrangler": "^3.99.0"
   },
   "engines": {
     "node": ">=18.0.0"
