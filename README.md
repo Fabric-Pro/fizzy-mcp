@@ -37,7 +37,7 @@ This MCP server allows AI assistants like Claude, Cursor, and GitHub Copilot to 
 
 ## Features
 
-- **Full Fizzy API Coverage**: 47 tools covering Boards, Cards, Card Actions, Comments, Reactions, Steps, Columns, Tags, Users, and Notifications
+- **Full Fizzy API Coverage**: 44 tools covering Boards, Cards, Card Actions, Comments, Reactions, Steps, Columns, Tags, Users, and Notifications
 - **Multiple Transport Protocols**: Stdio (CLI/IDE), HTTP (Streamable), and SSE (deprecated)
 - **Multi-User Support**: HTTP and SSE transports support multiple users with per-user authentication
 - **Flexible Deployment**: Run locally (Node.js) or deploy globally (Cloudflare Workers)
@@ -578,13 +578,10 @@ npx fizzy-mcp --transport http --port 3000
 | `fizzy_update_column` | Update column name/color |
 | `fizzy_delete_column` | Delete a column |
 
-### Tags (4)
+### Tags (1)
 | Tool | Description |
 |------|-------------|
 | `fizzy_get_tags` | List all tags in an account |
-| `fizzy_get_board_tags` | List tags used on a board |
-| `fizzy_create_tag` | Create a new tag |
-| `fizzy_delete_tag` | Delete a tag |
 
 ### Users (4)
 | Tool | Description |
