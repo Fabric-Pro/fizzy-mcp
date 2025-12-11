@@ -7,6 +7,7 @@
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for [Fizzy](https://fizzy.do) — the project management tool by Basecamp.
 
 > 🚀 **Try it live**: [https://fizzy.fabric.pro/mcp](https://fizzy.fabric.pro/mcp)
+>
 > 📖 **Fizzy API Documentation**: [github.com/basecamp/fizzy/blob/main/docs/API.md](https://github.com/basecamp/fizzy/blob/main/docs/API.md)
 
 This MCP server allows AI assistants like Claude, Cursor, and GitHub Copilot to interact with your Fizzy boards, cards, and projects through natural language.
