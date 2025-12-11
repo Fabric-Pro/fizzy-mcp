@@ -9,6 +9,7 @@ This guide explains how to deploy the Fizzy MCP server to [Cloudflare Workers](h
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [Optional Features](#optional-features)
 - [Deployment](#deployment)
 - [Connecting Clients](#connecting-clients)
 - [Security](#security)
@@ -24,8 +25,10 @@ The Cloudflare Workers deployment provides:
 - **⚡ Near-Zero Cold Starts**: V8 isolates start in milliseconds
 - **📈 Automatic Scaling**: Handles traffic spikes without configuration
 - **🔄 Stateful Sessions**: Uses Durable Objects for session persistence
-- **🔒 Built-in Security**: CORS, per-user authentication, TLS
+- **🔒 Built-in Security**: CORS, per-user authentication, rate limiting, TLS
 - **👥 Multi-User Support**: Each user provides their own Fizzy token
+- **📊 Analytics & Logging**: Optional Analytics Engine metrics and R2 audit logs
+- **⚡ Caching**: Optional KV caching to reduce Fizzy API calls
 
 ## Transport Support
 
@@ -133,6 +136,9 @@ Configure in `wrangler.jsonc`:
 | `FIZZY_BASE_URL` | No | `https://app.fizzy.do` | Fizzy API base URL |
 | `MCP_ALLOWED_ORIGINS` | No | `*` | Allowed CORS origins (comma-separated) |
 | `LOG_LEVEL` | No | `info` | Logging level (debug, info, warn, error) |
+| `RATE_LIMIT_RPM` | No | `100` | Requests per minute per user |
+| `ENABLE_RATE_LIMIT` | No | `true` | Enable/disable rate limiting |
+| `ENABLE_CACHE` | No | `true` | Enable/disable KV caching |
 
 ### Authentication Model (Multi-User)
 
@@ -146,6 +152,159 @@ This enables:
 - **Multi-tenant deployments**: Each user has their own Fizzy account
 - **No secrets on server**: Simpler deployment, better security
 - **Per-request authentication**: Token is validated on each call
+
+## Optional Features
+
+The Cloudflare deployment supports several optional features that enhance logging, security, and performance. These require additional Cloudflare resources to be created and configured.
+
+### 1. Audit Logs (R2 Storage)
+
+Store structured logs for audit trails, debugging, and compliance.
+
+**Setup:**
+```bash
+# Create the R2 bucket
+wrangler r2 bucket create fizzy-mcp-logs
+```
+
+Then uncomment the R2 configuration in `wrangler.jsonc`:
+```jsonc
+"r2_buckets": [
+  {
+    "binding": "AUDIT_LOGS",
+    "bucket_name": "fizzy-mcp-logs"
+  }
+]
+```
+
+**What's logged:**
+- Tool invocations (tool name, account, duration, success/failure)
+- Session lifecycle events (created, initialized, expired)
+- Errors with context
+
+**Log format:** NDJSON (newline-delimited JSON) for easy processing
+**Log path:** `logs/YYYY-MM-DD/HH/session-id/timestamp.ndjson`
+
+### 2. Analytics Engine (Metrics)
+
+Track metrics for dashboards, alerting, and cost optimization.
+
+**Setup:**
+1. Enable Analytics Engine in [Cloudflare Dashboard](https://dash.cloudflare.com) → Analytics → Analytics Engine
+2. Uncomment in `wrangler.jsonc`:
+```jsonc
+"analytics_engine_datasets": [
+  {
+    "binding": "ANALYTICS",
+    "dataset": "fizzy_mcp_analytics"
+  }
+]
+```
+
+**Tracked metrics:**
+- Tool invocation counts and latency by tool name
+- Session creation/initialization/expiration rates
+- Error rates by type
+- Request latency percentiles
+
+**Example SQL queries:**
+```sql
+-- Tool invocations by tool (last 24h)
+SELECT blob1 AS tool_name, 
+       SUM(_sample_interval) AS invocations,
+       AVG(double1) AS avg_duration_ms
+FROM fizzy_mcp_analytics
+WHERE index1 = 'tool_invocation'
+  AND timestamp > NOW() - INTERVAL '24' HOUR
+GROUP BY blob1
+ORDER BY invocations DESC;
+
+-- Error rates (last 24h)
+SELECT blob1 AS error_type, 
+       SUM(_sample_interval) AS error_count
+FROM fizzy_mcp_analytics
+WHERE index1 = 'error'
+  AND timestamp > NOW() - INTERVAL '24' HOUR
+GROUP BY blob1;
+```
+
+### 3. Rate Limiting (Durable Objects)
+
+Protect against abuse with per-user rate limiting.
+
+**Enabled by default** when deploying. Configure limits in `wrangler.jsonc`:
+
+```jsonc
+"vars": {
+  "RATE_LIMIT_RPM": "100",      // Requests per minute per user
+  "ENABLE_RATE_LIMIT": "true"   // Set to "false" to disable
+}
+```
+
+**Features:**
+- Sliding window algorithm for accurate limiting
+- Per-user limits (based on hashed Fizzy token)
+- Standard `X-RateLimit-*` headers in responses
+- `429 Too Many Requests` with `Retry-After` header when exceeded
+
+### 4. KV Caching (Response Cache)
+
+Cache Fizzy API responses to reduce latency and API calls.
+
+**Setup:**
+```bash
+# Create the KV namespace
+wrangler kv namespace create FIZZY_CACHE
+wrangler kv namespace create FIZZY_CACHE --preview  # For local dev
+```
+
+Add the namespace IDs to `wrangler.jsonc`:
+```jsonc
+"kv_namespaces": [
+  {
+    "binding": "FIZZY_CACHE",
+    "id": "<your-kv-namespace-id>",
+    "preview_id": "<your-preview-kv-namespace-id>"
+  }
+]
+```
+
+**Cache TTLs:**
+| Resource | TTL |
+|----------|-----|
+| Identity/Accounts | 30 minutes |
+| Boards | 5 minutes |
+| Cards | 1 minute |
+| Columns | 5 minutes |
+| Tags/Users | 10 minutes |
+| Notifications | 30 seconds |
+| Comments | 1 minute |
+
+**Note:** Cache is automatically invalidated on mutations.
+
+### Feature Summary
+
+Check which features are enabled via the health endpoint:
+
+```bash
+curl https://fizzy-mcp.<your-subdomain>.workers.dev/health
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "transport": "streamable-http",
+  "version": "1.0.0",
+  "durableObjects": true,
+  "features": {
+    "rateLimiting": true,
+    "auditLogs": false,
+    "analytics": false,
+    "caching": false
+  }
+}
+```
 
 ### Environments
 
@@ -376,8 +535,38 @@ Response:
   "status": "ok",
   "transport": "streamable-http",
   "version": "1.0.0",
-  "durableObjects": true
+  "durableObjects": true,
+  "features": {
+    "rateLimiting": true,
+    "auditLogs": true,
+    "analytics": true,
+    "caching": false
+  }
 }
+```
+
+### R2 Audit Logs
+
+If audit logging is enabled, you can analyze logs via:
+
+1. **Cloudflare Dashboard**: R2 → fizzy-mcp-logs → Browse objects
+2. **Workers Analytics SQL**: Query processed log data
+3. **Download and analyze locally**:
+   ```bash
+   wrangler r2 object get fizzy-mcp-logs logs/2024-01-15/12/session-abc/1705321234567.ndjson
+   ```
+
+### Analytics Engine Queries
+
+Query metrics via Cloudflare Dashboard → Analytics → Analytics Engine, or via API:
+
+```bash
+# Get tool usage stats
+curl -X POST https://api.cloudflare.com/client/v4/accounts/{account_id}/analytics_engine/sql \
+  -H "Authorization: Bearer $CF_API_TOKEN" \
+  -d '{
+    "query": "SELECT blob1 AS tool, COUNT() FROM fizzy_mcp_analytics WHERE index1 = '\''tool_invocation'\'' GROUP BY blob1"
+  }'
 ```
 
 ## Troubleshooting

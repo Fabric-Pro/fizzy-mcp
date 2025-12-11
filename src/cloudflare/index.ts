@@ -10,6 +10,9 @@
  * - Security validation (Origin)
  * - Multi-user authentication via Authorization header
  * - Session routing via Durable Objects
+ * - Rate limiting (optional, via RATE_LIMITER binding)
+ * - Request/response logging (optional, via AUDIT_LOGS R2 bucket)
+ * - Analytics tracking (optional, via ANALYTICS binding)
  * 
  * Authentication Model (Multi-User):
  * - Each client provides their own Fizzy Personal Access Token
@@ -23,9 +26,11 @@
 
 import type { Env, ExecutionContext, SecurityResult, HealthResponse } from "./types.js";
 import { SERVER_VERSION } from "./types.js";
+import { RateLimiter, createLogger, createAnalytics, type LogLevel } from "./utils/index.js";
 
-// Re-export Durable Object class for Wrangler
+// Re-export Durable Object classes for Wrangler
 export { McpSessionDO } from "./mcp-session.js";
+export { RateLimiterDO } from "./utils/rate-limiter.js";
 
 /**
  * Extract Fizzy token from request headers
@@ -146,12 +151,18 @@ function errorResponse(
 /**
  * Handle health check requests
  */
-function handleHealth(corsOrigin: string): Response {
-  const health: HealthResponse = {
+function handleHealth(corsOrigin: string, env: Env): Response {
+  const health: HealthResponse & { features?: Record<string, boolean> } = {
     status: "ok",
     transport: "streamable-http",
     version: SERVER_VERSION,
     durableObjects: true,
+    features: {
+      rateLimiting: !!env.RATE_LIMITER && env.ENABLE_RATE_LIMIT !== "false",
+      auditLogs: !!env.AUDIT_LOGS,
+      analytics: !!env.ANALYTICS,
+      caching: !!env.FIZZY_CACHE && env.ENABLE_CACHE !== "false",
+    },
   };
 
   const headers = new Headers({ "Content-Type": "application/json" });
@@ -252,10 +263,21 @@ export default {
   async fetch(
     request: Request,
     env: Env,
-    _ctx: ExecutionContext
+    ctx: ExecutionContext
   ): Promise<Response> {
+    const startTime = Date.now();
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // Initialize logger
+    const logger = createLogger({
+      level: (env.LOG_LEVEL as LogLevel) || "info",
+      r2Bucket: env.AUDIT_LOGS,
+      consoleOutput: true,
+    });
+
+    // Initialize analytics
+    const analytics = createAnalytics(env.ANALYTICS);
 
     // Validate Durable Objects binding
     if (!env.MCP_SESSIONS) {
@@ -266,7 +288,7 @@ export default {
     // Handle health check (skip security for monitoring)
     if (path === "/health" && request.method === "GET") {
       const security = validateSecurity(request, env);
-      return handleHealth(security.corsOrigin || "*");
+      return handleHealth(security.corsOrigin || "*", env);
     }
 
     // Validate security for all other requests
@@ -279,6 +301,7 @@ export default {
 
     // Check security result
     if (!security.allowed) {
+      analytics.trackRequest(request.method, path, security.statusCode || 403, Date.now() - startTime);
       return errorResponse(
         security.statusCode || 403,
         security.error || "Access denied",
@@ -288,10 +311,41 @@ export default {
 
     // Route to MCP handler (Streamable HTTP transport)
     if (path === "/mcp") {
-      return handleMcp(request, env, security.corsOrigin!);
+      // Check rate limit if enabled
+      if (env.RATE_LIMITER && env.ENABLE_RATE_LIMIT !== "false") {
+        const fizzyToken = extractFizzyToken(request);
+        if (fizzyToken) {
+          const rateLimiter = new RateLimiter(env.RATE_LIMITER, {
+            limit: parseInt(env.RATE_LIMIT_RPM || "100", 10),
+            windowSeconds: 60,
+          });
+
+          const rateLimitResult = await rateLimiter.checkByToken(fizzyToken);
+          
+          if (!rateLimitResult.allowed) {
+            logger.warn("Rate limit exceeded", {
+              remaining: rateLimitResult.remaining,
+              resetAt: rateLimitResult.resetAt,
+            });
+            analytics.trackRequest(request.method, path, 429, Date.now() - startTime);
+            return RateLimiter.createRateLimitResponse(rateLimitResult, security.corsOrigin);
+          }
+        }
+      }
+
+      const response = await handleMcp(request, env, security.corsOrigin!);
+      
+      // Track request metrics
+      analytics.trackRequest(request.method, path, response.status, Date.now() - startTime);
+      
+      // Flush logs asynchronously
+      ctx.waitUntil(logger.flush());
+      
+      return response;
     }
 
     // 404 for unknown routes
+    analytics.trackRequest(request.method, path, 404, Date.now() - startTime);
     return errorResponse(404, "Not found", security.corsOrigin);
   },
 };

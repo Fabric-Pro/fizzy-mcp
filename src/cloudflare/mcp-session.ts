@@ -8,6 +8,8 @@
  * - Maintains the FizzyClient and session state
  * - Handles JSON-RPC message routing
  * - Persists across requests within the same session
+ * - Logs tool invocations for audit trails
+ * - Tracks metrics via Analytics Engine
  * 
  * @see https://developers.cloudflare.com/durable-objects/
  */
@@ -27,6 +29,13 @@ import {
   SERVER_NAME,
   SERVER_VERSION,
 } from "./types.js";
+import { 
+  createLogger, 
+  createAnalytics,
+  type CloudflareLogger,
+  type CloudflareAnalytics,
+  type LogLevel,
+} from "./utils/index.js";
 
 /**
  * Session timeout in milliseconds (30 minutes)
@@ -48,9 +57,22 @@ export class McpSessionDO extends DurableObject<Env> {
   private client: FizzyClient | null = null;
   private sessionState: McpSessionState | null = null;
   private currentFizzyToken: string | null = null;
+  private logger: CloudflareLogger;
+  private analytics: CloudflareAnalytics;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    
+    // Initialize logger with session ID
+    this.logger = createLogger({
+      level: (env.LOG_LEVEL as LogLevel) || "info",
+      r2Bucket: env.AUDIT_LOGS,
+      sessionId: ctx.id.toString(),
+      consoleOutput: true,
+    });
+    
+    // Initialize analytics
+    this.analytics = createAnalytics(env.ANALYTICS);
   }
 
   /**
@@ -213,11 +235,23 @@ export class McpSessionDO extends DurableObject<Env> {
     id: string | number | undefined,
     params: Record<string, unknown>
   ): Promise<JsonRpcResponse> {
+    const clientInfo = params?.clientInfo as { name?: string; version?: string } | undefined;
+    
     if (this.sessionState) {
       this.sessionState.initialized = true;
-      this.sessionState.clientInfo = params?.clientInfo as { name?: string; version?: string };
+      this.sessionState.clientInfo = clientInfo;
       await this.ctx.storage.put("sessionState", this.sessionState);
     }
+
+    // Log session initialization
+    this.logger.logSessionEvent("initialized", clientInfo);
+    
+    // Track session initialization metrics
+    this.analytics.trackSessionInitialized(
+      this.ctx.id.toString(),
+      clientInfo?.name,
+      clientInfo?.version
+    );
 
     return {
       jsonrpc: "2.0",
@@ -338,6 +372,7 @@ export class McpSessionDO extends DurableObject<Env> {
   ): Promise<JsonRpcResponse> {
     const toolName = params?.name as string;
     const toolArgs = params?.arguments as Record<string, unknown> || {};
+    const startTime = Date.now();
 
     if (!toolName) {
       return {
@@ -355,8 +390,27 @@ export class McpSessionDO extends DurableObject<Env> {
       };
     }
 
+    const accountSlug = (toolArgs.account_slug as string) || "unknown";
+
     try {
       const result = await this.executeToolCall(toolName, toolArgs);
+      const durationMs = Date.now() - startTime;
+      
+      // Log successful tool invocation
+      this.logger.logToolInvocation(toolName, accountSlug, toolArgs, {
+        success: true,
+        durationMs,
+      });
+      
+      // Track metrics
+      this.analytics.trackToolInvocation(
+        toolName,
+        accountSlug,
+        true,
+        durationMs,
+        this.ctx.id.toString()
+      );
+
       return {
         jsonrpc: "2.0",
         id,
@@ -370,12 +424,38 @@ export class McpSessionDO extends DurableObject<Env> {
         },
       };
     } catch (error) {
+      const durationMs = Date.now() - startTime;
+      const errorInstance = error instanceof Error ? error : new Error(String(error));
+      
+      // Log failed tool invocation
+      this.logger.logToolInvocation(toolName, accountSlug, toolArgs, {
+        success: false,
+        durationMs,
+        error: errorInstance,
+      });
+      
+      // Track error metrics
+      this.analytics.trackToolInvocation(
+        toolName,
+        accountSlug,
+        false,
+        durationMs,
+        this.ctx.id.toString()
+      );
+      this.analytics.trackError(
+        "tool_execution",
+        errorInstance.message,
+        -32603,
+        toolName,
+        this.ctx.id.toString()
+      );
+
       return {
         jsonrpc: "2.0",
         id,
         error: {
           code: -32603,
-          message: error instanceof Error ? error.message : "Tool execution failed",
+          message: errorInstance.message,
         },
       };
     }
@@ -626,8 +706,22 @@ export class McpSessionDO extends DurableObject<Env> {
     const timeSinceActivity = now - sessionState.lastActivityAt;
 
     if (timeSinceActivity > SESSION_TIMEOUT_MS) {
+      const sessionDurationSeconds = Math.round((now - sessionState.createdAt) / 1000);
+      
+      // Log session expiration
+      this.logger.logSessionEvent("expired", sessionState.clientInfo);
+      
+      // Track session expiration metrics
+      this.analytics.trackSessionExpired(
+        this.ctx.id.toString(),
+        sessionDurationSeconds
+      );
+      
       console.log(`Session expired after ${Math.round(timeSinceActivity / 1000)}s of inactivity`);
       await this.ctx.storage.deleteAll();
+      
+      // Flush logs before cleanup
+      await this.logger.flush();
       return;
     }
 

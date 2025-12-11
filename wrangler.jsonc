@@ -8,15 +8,22 @@
   // Environment variables (non-secret defaults)
   "vars": {
     "FIZZY_BASE_URL": "https://app.fizzy.do",
-    "LOG_LEVEL": "info"
+    "LOG_LEVEL": "info",
+    "RATE_LIMIT_RPM": "100",
+    "ENABLE_CACHE": "true",
+    "ENABLE_RATE_LIMIT": "true"
   },
 
-  // Durable Objects for session management
+  // Durable Objects for session management and rate limiting
   "durable_objects": {
     "bindings": [
       {
         "name": "MCP_SESSIONS",
         "class_name": "McpSessionDO"
+      },
+      {
+        "name": "RATE_LIMITER",
+        "class_name": "RateLimiterDO"
       }
     ]
   },
@@ -26,8 +33,43 @@
     {
       "tag": "v1",
       "new_classes": ["McpSessionDO"]
+    },
+    {
+      "tag": "v2",
+      "new_classes": ["RateLimiterDO"]
     }
   ],
+
+  // KV namespaces for caching
+  // NOTE: Create these in Cloudflare dashboard or via CLI:
+  //   wrangler kv namespace create FIZZY_CACHE
+  //   wrangler kv namespace create FIZZY_CACHE --preview
+  // "kv_namespaces": [
+  //   {
+  //     "binding": "FIZZY_CACHE",
+  //     "id": "<your-kv-namespace-id>",
+  //     "preview_id": "<your-preview-kv-namespace-id>"
+  //   }
+  // ],
+
+  // R2 buckets for audit logs
+  // NOTE: Create in Cloudflare dashboard or via CLI:
+  //   wrangler r2 bucket create fizzy-mcp-logs
+  // "r2_buckets": [
+  //   {
+  //     "binding": "AUDIT_LOGS",
+  //     "bucket_name": "fizzy-mcp-logs"
+  //   }
+  // ],
+
+  // Analytics Engine dataset for metrics
+  // NOTE: Enable Analytics Engine in Cloudflare dashboard first
+  // "analytics_engine_datasets": [
+  //   {
+  //     "binding": "ANALYTICS",
+  //     "dataset": "fizzy_mcp_analytics"
+  //   }
+  // ],
 
   // Development settings
   "dev": {
@@ -41,16 +83,42 @@
       "name": "fizzy-mcp-production",
       "vars": {
         "FIZZY_BASE_URL": "https://app.fizzy.do",
-        "LOG_LEVEL": "warn"
+        "LOG_LEVEL": "warn",
+        "RATE_LIMIT_RPM": "100",
+        "ENABLE_CACHE": "true",
+        "ENABLE_RATE_LIMIT": "true"
       },
       "durable_objects": {
         "bindings": [
           {
             "name": "MCP_SESSIONS",
             "class_name": "McpSessionDO"
+          },
+          {
+            "name": "RATE_LIMITER",
+            "class_name": "RateLimiterDO"
           }
         ]
       },
+      "kv_namespaces": [
+        {
+          "binding": "FIZZY_CACHE",
+          "id": "1947a840db4942b78963cdeefa8f2edd"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "AUDIT_LOGS",
+          "bucket_name": "fizzy-mcp-logs-production"
+        }
+      ],
+      // Analytics Engine - enable in Cloudflare Dashboard first:
+      // "analytics_engine_datasets": [
+      //   {
+      //     "binding": "ANALYTICS",
+      //     "dataset": "fizzy_mcp_analytics"
+      //   }
+      // ],
       "routes": [
         { "pattern": "fizzy.fabric.pro", "custom_domain": true }
       ]
@@ -59,16 +127,35 @@
       "name": "fizzy-mcp-staging",
       "vars": {
         "FIZZY_BASE_URL": "https://app.fizzy.do",
-        "LOG_LEVEL": "debug"
+        "LOG_LEVEL": "debug",
+        "RATE_LIMIT_RPM": "200",
+        "ENABLE_CACHE": "true",
+        "ENABLE_RATE_LIMIT": "true"
       },
       "durable_objects": {
         "bindings": [
           {
             "name": "MCP_SESSIONS",
             "class_name": "McpSessionDO"
+          },
+          {
+            "name": "RATE_LIMITER",
+            "class_name": "RateLimiterDO"
           }
         ]
       },
+      "kv_namespaces": [
+        {
+          "binding": "FIZZY_CACHE",
+          "id": "f7b2b9ab977e478dbbff05a1b1c442f4"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "AUDIT_LOGS",
+          "bucket_name": "fizzy-mcp-logs-staging"
+        }
+      ],
       "routes": [
         { "pattern": "fizzy-staging.fabric.pro", "custom_domain": true }
       ]

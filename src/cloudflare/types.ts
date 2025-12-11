@@ -5,7 +5,14 @@
  * available to the Fizzy MCP Worker.
  */
 
-import type { DurableObjectNamespace, DurableObjectState, ExecutionContext } from "@cloudflare/workers-types";
+import type { 
+  DurableObjectNamespace, 
+  DurableObjectState, 
+  ExecutionContext,
+  R2Bucket,
+  KVNamespace,
+  AnalyticsEngineDataset,
+} from "@cloudflare/workers-types";
 
 /**
  * Environment bindings for the Fizzy MCP Worker
@@ -35,11 +42,56 @@ export interface Env {
    */
   MCP_ALLOWED_ORIGINS?: string;
 
+  /**
+   * Rate limit: requests per minute per user
+   * Default: 100
+   */
+  RATE_LIMIT_RPM?: string;
+
+  /**
+   * Enable/disable caching
+   * Default: "true"
+   */
+  ENABLE_CACHE?: string;
+
+  /**
+   * Enable/disable rate limiting
+   * Default: "true"
+   */
+  ENABLE_RATE_LIMIT?: string;
+
   // === Durable Object Bindings ===
   /**
    * Durable Object namespace for MCP sessions
    */
   MCP_SESSIONS: DurableObjectNamespace;
+
+  /**
+   * Durable Object namespace for rate limiting (optional)
+   * If not provided, rate limiting is disabled
+   */
+  RATE_LIMITER?: DurableObjectNamespace;
+
+  // === R2 Storage Bindings (optional) ===
+  /**
+   * R2 bucket for audit logs
+   * If not provided, logs are only written to console
+   */
+  AUDIT_LOGS?: R2Bucket;
+
+  // === KV Bindings (optional) ===
+  /**
+   * KV namespace for caching Fizzy API responses
+   * If not provided, caching is disabled
+   */
+  FIZZY_CACHE?: KVNamespace;
+
+  // === Analytics Engine Bindings (optional) ===
+  /**
+   * Analytics Engine dataset for metrics
+   * If not provided, metrics are not collected
+   */
+  ANALYTICS?: AnalyticsEngineDataset;
 }
 
 /**
