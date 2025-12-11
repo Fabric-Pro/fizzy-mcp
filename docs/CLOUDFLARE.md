@@ -5,6 +5,7 @@ This guide explains how to deploy the Fizzy MCP server to [Cloudflare Workers](h
 ## Table of Contents
 
 - [Overview](#overview)
+- [Transport Support](#transport-support)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
@@ -23,7 +24,27 @@ The Cloudflare Workers deployment provides:
 - **⚡ Near-Zero Cold Starts**: V8 isolates start in milliseconds
 - **📈 Automatic Scaling**: Handles traffic spikes without configuration
 - **🔄 Stateful Sessions**: Uses Durable Objects for session persistence
-- **🔒 Built-in Security**: CORS, Bearer token authentication, TLS
+- **🔒 Built-in Security**: CORS, per-user authentication, TLS
+- **👥 Multi-User Support**: Each user provides their own Fizzy token
+
+## Transport Support
+
+**Cloudflare Workers only supports HTTP (Streamable) transport.**
+
+| Transport | Supported | Reason |
+|-----------|-----------|--------|
+| **HTTP (Streamable)** | ✅ Yes | Current standard (protocol version 2025-03-26) |
+| **stdio** | ❌ No | Cloudflare Workers cannot spawn processes |
+| **SSE** | ❌ No | Deprecated transport (protocol version 2024-11-05) |
+
+### Authentication Model
+
+Unlike the Node.js stdio transport which uses a single `FIZZY_ACCESS_TOKEN` environment variable, Cloudflare Workers uses **per-user authentication**:
+
+- **No FIZZY_ACCESS_TOKEN needed**: The server does not require a shared access token
+- **Per-user tokens**: Each user provides their own Fizzy Personal Access Token via `Authorization: Bearer <token>` header
+- **Session isolation**: Each session gets its own FizzyClient instance with the user's token
+- **Multi-user support**: Multiple users can connect simultaneously with complete data isolation
 
 ### Architecture
 
@@ -52,8 +73,9 @@ The Cloudflare Workers deployment provides:
 
 1. **Cloudflare Account**: Sign up at [cloudflare.com](https://cloudflare.com)
 2. **Wrangler CLI**: Installed via npm (included in dev dependencies)
-3. **Fizzy Access Token**: Get from [app.fizzy.do](https://app.fizzy.do) → Profile → API → Personal access tokens
-4. **Node.js 18+**: For development and deployment
+3. **Node.js 18+**: For development and deployment
+
+**Note**: Unlike Node.js stdio deployment, you do **not** need to configure a `FIZZY_ACCESS_TOKEN` environment variable. Each user will provide their own Fizzy Personal Access Token when connecting to the deployed Worker.
 
 ## Quick Start
 
@@ -99,7 +121,8 @@ The Worker exposes the following endpoints:
 | `/health` | GET | Health check endpoint (returns server status) |
 | `/mcp` | POST | MCP protocol endpoint (HTTP Streamable transport) |
 | `/mcp` | DELETE | Close MCP session |
-| `/sse` | GET | Server-Sent Events streaming endpoint |
+
+**Note**: The `/sse` endpoint is not available on Cloudflare Workers. SSE transport is deprecated and only supported on Node.js deployments.
 
 ### Environment Variables
 
@@ -168,10 +191,12 @@ fizzy-mcp.yourdomain.com → fizzy-mcp.workers.dev
 
 ## Connecting Clients
 
-The Fizzy MCP server supports two transport protocols:
+**Cloudflare Workers only supports HTTP (Streamable) transport.**
 
-1. **HTTP Streamable** (`/mcp`) - Recommended for most clients
-2. **Server-Sent Events** (`/sse`) - For clients that prefer SSE streaming
+All clients must:
+1. Use the `/mcp` endpoint
+2. Provide their Fizzy Personal Access Token via `Authorization: Bearer <token>` header
+3. Use HTTP (Streamable) transport
 
 ### Cursor IDE
 
@@ -192,24 +217,6 @@ Edit `~/.cursor/mcp.json`:
 ```
 
 > **Important**: Replace `YOUR_FIZZY_PERSONAL_ACCESS_TOKEN` with your actual Fizzy token from [app.fizzy.do](https://app.fizzy.do) → Profile → API → Personal access tokens.
-
-### Using SSE Transport
-
-For clients that support Server-Sent Events:
-
-```json
-{
-  "mcpServers": {
-    "fizzy": {
-      "url": "https://fizzy-mcp.<your-subdomain>.workers.dev/sse",
-      "transport": "sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN"
-      }
-    }
-  }
-}
-```
 
 ### Claude Desktop
 
@@ -233,16 +240,32 @@ Edit your Claude Desktop config:
 
 ### Testing with MCP Inspector
 
+[MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool for testing MCP servers. Here's how to test your Cloudflare deployment:
+
+**1. Start local development server:**
 ```bash
-npx @modelcontextprotocol/inspector@latest
+npm run cf:dev
+# Server runs on http://localhost:8787
 ```
 
-1. Set **Transport Type** to `Streamable HTTP`
-2. Enter URL: `http://localhost:8787/mcp` (local) or your Worker URL
-3. Click **Headers** and add:
-   - **Key**: `Authorization`
-   - **Value**: `Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN`
-4. Click **Connect**
+**2. Launch MCP Inspector:**
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+**3. Configure the connection:**
+- **Transport**: Select "HTTP"
+- **URL**: `http://localhost:8787/mcp` (local) or `https://fizzy-mcp.<your-subdomain>.workers.dev/mcp` (production)
+- **Headers**: Click "Add Header" and add:
+  - **Key**: `Authorization`
+  - **Value**: `Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN`
+
+**4. Test the connection:**
+- Click **Connect**
+- You should see the list of 47 available tools
+- Try calling tools like `fizzy_get_identity` or `fizzy_get_boards`
+
+**Note**: MCP Inspector only supports HTTP transport. SSE transport is not available on Cloudflare Workers.
 
 ## Security
 
@@ -254,15 +277,20 @@ npx @modelcontextprotocol/inspector@latest
 Authorization: Bearer <fizzy-personal-access-token>
 ```
 
+**Two-Layer Authentication System:**
+
 1. **User Authentication** (via `Authorization` header):
-   - Required for all API operations
+   - **Required** for all API operations
+   - Each user provides their own Fizzy Personal Access Token
+   - Token is used to create a per-user FizzyClient instance
    - Authenticates requests to Fizzy API
-   - Set as a Cloudflare secret (never exposed)
+   - Provides complete session isolation between users
 
 2. **Client Authentication** (`MCP_AUTH_TOKEN`):
-   - Optional but recommended for public deployments
-   - Requires clients to provide Bearer token
-   - Prevents unauthorized access to your MCP server
+   - **Optional** but recommended for public deployments
+   - Requires MCP clients (like IDE extensions) to provide a server-level bearer token
+   - Prevents unauthorized MCP clients from connecting to your server
+   - Independent of user authentication
 
 ### CORS Configuration
 
@@ -354,33 +382,44 @@ Response:
 
 ## Troubleshooting
 
-### "FIZZY_ACCESS_TOKEN not configured"
+### "Authorization required" or "Missing Fizzy token"
 
-Set the secret:
-```bash
-npx wrangler secret put FIZZY_ACCESS_TOKEN
-```
+**Cause**: User didn't provide their Fizzy Personal Access Token in the Authorization header.
 
-### "Client authentication required"
-
-Add the `Authorization` header to your client:
+**Solution**: Each user must provide their own Fizzy token:
 ```json
 {
   "headers": {
-    "Authorization": "Bearer your-mcp-auth-token"
+    "Authorization": "Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN"
   }
 }
 ```
 
+Get your token from [app.fizzy.do](https://app.fizzy.do) → Profile → API → Personal access tokens.
+
+### "Client authentication required"
+
+**Cause**: Server has `MCP_AUTH_TOKEN` configured but client didn't provide it.
+
+**Solution**: This is different from user authentication. If the server requires client authentication, contact the server administrator for the MCP auth token.
+
 ### "Origin not allowed"
 
-Add your client's origin to `MCP_ALLOWED_ORIGINS`:
-```bash
-npx wrangler secret put MCP_ALLOWED_ORIGINS
-# Enter: https://your-app.com
+**Cause**: CORS policy blocks your origin.
+
+**Solution**: Update `MCP_ALLOWED_ORIGINS` in `wrangler.jsonc`:
+```jsonc
+"vars": {
+  "MCP_ALLOWED_ORIGINS": "https://your-app.com,https://another-app.com"
+}
 ```
 
-Or set to `*` in `wrangler.jsonc` for development.
+Or set to `*` for development (not recommended for production):
+```jsonc
+"vars": {
+  "MCP_ALLOWED_ORIGINS": "*"
+}
+```
 
 ### Session Errors
 

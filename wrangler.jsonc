@@ -40,14 +40,38 @@
     "production": {
       "name": "fizzy-mcp-production",
       "vars": {
+        "FIZZY_BASE_URL": "https://app.fizzy.do",
         "LOG_LEVEL": "warn"
-      }
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "MCP_SESSIONS",
+            "class_name": "McpSessionDO"
+          }
+        ]
+      },
+      "routes": [
+        { "pattern": "fizzy.fabric.pro", "custom_domain": true }
+      ]
     },
     "staging": {
       "name": "fizzy-mcp-staging",
       "vars": {
+        "FIZZY_BASE_URL": "https://app.fizzy.do",
         "LOG_LEVEL": "debug"
-      }
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "MCP_SESSIONS",
+            "class_name": "McpSessionDO"
+          }
+        ]
+      },
+      "routes": [
+        { "pattern": "fizzy-staging.fabric.pro", "custom_domain": true }
+      ]
     }
   }
 }

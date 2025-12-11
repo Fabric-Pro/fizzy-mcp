@@ -6,6 +6,7 @@
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for [Fizzy](https://fizzy.do) — the project management tool by Basecamp.
 
+> 🚀 **Try it live**: [https://fizzy.fabric.pro/mcp](https://fizzy.fabric.pro/mcp)
 > 📖 **Fizzy API Documentation**: [github.com/basecamp/fizzy/blob/main/docs/API.md](https://github.com/basecamp/fizzy/blob/main/docs/API.md)
 
 This MCP server allows AI assistants like Claude, Cursor, and GitHub Copilot to interact with your Fizzy boards, cards, and projects through natural language.
@@ -13,6 +14,7 @@ This MCP server allows AI assistants like Claude, Cursor, and GitHub Copilot to 
 ## Table of Contents
 
 - [Features](#features)
+- [Transport Support](#transport-support)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
@@ -21,6 +23,7 @@ This MCP server allows AI assistants like Claude, Cursor, and GitHub Copilot to 
   - [For Cursor IDE](#for-cursor-ide)
   - [For VS Code with GitHub Copilot](#for-vs-code-with-github-copilot)
   - [For Claude Desktop](#for-claude-desktop)
+  - [For Other MCP-Compatible IDEs](#for-other-mcp-compatible-ides)
 - [Running the Server](#running-the-server)
 - [Environment Variables](#environment-variables)
 - [Available Tools](#available-tools-47-total)
@@ -35,14 +38,63 @@ This MCP server allows AI assistants like Claude, Cursor, and GitHub Copilot to 
 ## Features
 
 - **Full Fizzy API Coverage**: 47 tools covering Boards, Cards, Card Actions, Comments, Reactions, Steps, Columns, Tags, Users, and Notifications
-- **Multiple Transport Protocols**: Stdio, SSE, and Streamable HTTP
+- **Multiple Transport Protocols**: Stdio (CLI/IDE), HTTP (Streamable), and SSE (deprecated)
+- **Multi-User Support**: HTTP and SSE transports support multiple users with per-user authentication
+- **Flexible Deployment**: Run locally (Node.js) or deploy globally (Cloudflare Workers)
 - **IDE Integration**: Works with Cursor, VS Code, Claude Desktop, and other MCP-compatible tools
-- **Local or Hosted**: Run locally for development or deploy as a hosted service
 - **Robust Error Handling**: Structured error classes with detailed error messages
 - **Automatic Retries**: Exponential backoff retry logic for transient failures (5xx errors, timeouts, network issues)
 - **Request Timeout**: 30-second default timeout to prevent hanging requests
 - **ETag Caching**: Automatic HTTP caching using ETags to reduce bandwidth and improve response times (as per [Fizzy API caching spec](https://github.com/basecamp/fizzy/blob/main/docs/API.md#caching))
-- **Fully Tested**: Comprehensive test suite with 300+ test cases
+- **Fully Tested**: Comprehensive test suite with 450+ test cases
+
+## Transport Support
+
+The Fizzy MCP server supports multiple transport protocols depending on your deployment environment:
+
+### Transport Comparison
+
+| Transport | Protocol Version | Node.js | Cloudflare | Use Case | Authentication |
+|-----------|-----------------|---------|------------|----------|----------------|
+| **stdio** | N/A | ✅ Yes | ❌ No | CLI/IDE integrations (Cursor, VS Code, Claude Desktop) | Single-user via `FIZZY_ACCESS_TOKEN` env var |
+| **HTTP** (Streamable) | 2025-03-26 | ✅ Yes | ✅ Yes | **Production deployments, multi-user applications** | Multi-user via `Authorization: Bearer <token>` header |
+| **SSE** | 2024-11-05 | ✅ Yes | ❌ No | ⚠️ **Deprecated** - backwards compatibility only | Multi-user via `Authorization: Bearer <token>` header |
+
+### Deployment-Specific Support
+
+#### **Node.js Deployment**
+Supports all three transports:
+- **stdio**: For single-user CLI/IDE integrations (recommended for local development)
+- **HTTP (Streamable)**: For multi-user web applications and production deployments (recommended)
+- **SSE**: Deprecated, maintained for backwards compatibility only
+
+#### **Cloudflare Workers Deployment**
+Supports HTTP transport only:
+- **HTTP (Streamable)**: The only supported transport for Cloudflare Workers
+- **Why no stdio?** Cloudflare Workers cannot spawn processes
+- **Why no SSE?** SSE transport is deprecated and not supported on Cloudflare
+
+### Recommendations
+
+- **For IDE integrations** (Cursor, VS Code, Claude Desktop): Use **stdio** transport
+- **For production deployments**: Use **HTTP (Streamable)** transport
+- **For multi-user applications**: Use **HTTP (Streamable)** transport
+- **For testing with MCP Inspector**: Use **HTTP (Streamable)** transport
+- **Avoid SSE**: The SSE transport is deprecated and will be removed in a future version
+
+### Authentication Models
+
+#### **stdio Transport** (Single-User)
+- Requires `FIZZY_ACCESS_TOKEN` environment variable
+- One user per server instance
+- Ideal for personal CLI/IDE use
+
+#### **HTTP/SSE Transports** (Multi-User)
+- Each user provides their own Fizzy Personal Access Token via `Authorization: Bearer <token>` header
+- Multiple users can connect simultaneously
+- Each session is isolated with its own FizzyClient instance
+- Sessions timeout after 30 minutes of inactivity
+- Optional server-level authentication via `MCP_AUTH_TOKEN` environment variable
 
 ## Prerequisites
 
@@ -59,7 +111,7 @@ Get up and running in 3 steps:
 
 2. **Run with npx** (no installation needed):
    ```bash
-   FIZZY_AFICCESS_TOKEN="your-token-here" npx fizzy-mcp
+   FIZZY_ACCESS_TOKEN="your-token-here" npx fizzy-mcp
    ```
 
 3. **Configure your IDE** (e.g., Cursor):
@@ -81,6 +133,8 @@ Get up and running in 3 steps:
    - Restart Cursor
 
 That's it! You can now ask your AI assistant to interact with Fizzy.
+
+> 💡 **Note**: This Quick Start uses **stdio transport** for single-user IDE integration. For production deployments or multi-user applications, see the [HTTP Transport](#streamable-http-transport-for-production) section.
 
 For detailed installation options and configuration, see the sections below.
 
@@ -147,6 +201,10 @@ fizzy-mcp --help
 
 ### For Cursor IDE
 
+Cursor supports two connection methods: **stdio** (local process) and **HTTP** (remote server).
+
+#### Option 1: Stdio Transport (Local Process - Recommended for Personal Use)
+
 1. Open Cursor Settings (`Cmd/Ctrl + ,`)
 2. Search for "MCP" or navigate to **Features > MCP Servers**
 3. Click **Edit in mcp.json** or manually edit `~/.cursor/mcp.json`:
@@ -184,7 +242,49 @@ fizzy-mcp --help
 
 4. **Restart Cursor** for changes to take effect
 
+#### Option 2: HTTP Transport (Remote Server - For Shared/Production Deployments)
+
+Use this method to connect to a remote Fizzy MCP server (e.g., deployed on Cloudflare Workers or a shared Node.js server).
+
+1. Open Cursor Settings and edit `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "fizzy": {
+      "url": "https://fizzy.fabric.pro/mcp",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**For local HTTP server:**
+
+```json
+{
+  "mcpServers": {
+    "fizzy": {
+      "url": "http://localhost:3000/mcp",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN"
+      }
+    }
+  }
+}
+```
+
+2. **Restart Cursor** for changes to take effect
+
+> 💡 **Tip**: Use the live server at [https://fizzy.fabric.pro/mcp](https://fizzy.fabric.pro/mcp) to try Fizzy MCP without running your own server!
+
 ### For VS Code with GitHub Copilot
+
+#### Option 1: Stdio Transport (Local Process)
 
 Create or edit `.vscode/mcp.json` in your workspace (or global settings):
 
@@ -202,7 +302,25 @@ Create or edit `.vscode/mcp.json` in your workspace (or global settings):
 }
 ```
 
+#### Option 2: HTTP Transport (Remote Server)
+
+```json
+{
+  "mcpServers": {
+    "fizzy": {
+      "url": "https://fizzy.fabric.pro/mcp",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN"
+      }
+    }
+  }
+}
+```
+
 ### For Claude Desktop
+
+Claude Desktop supports stdio transport only.
 
 Edit your Claude Desktop configuration file:
 
@@ -223,6 +341,26 @@ Edit your Claude Desktop configuration file:
   }
 }
 ```
+
+### For Other MCP-Compatible IDEs
+
+Most MCP-compatible IDEs support HTTP transport. Use this configuration pattern:
+
+```json
+{
+  "mcpServers": {
+    "fizzy": {
+      "url": "https://fizzy.fabric.pro/mcp",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN"
+      }
+    }
+  }
+}
+```
+
+Replace `https://fizzy.fabric.pro/mcp` with your own server URL if you're self-hosting.
 
 ---
 
@@ -288,12 +426,15 @@ npm install
 # Login to Cloudflare
 npx wrangler login
 
-# Set your Fizzy access token
-npx wrangler secret put FIZZY_ACCESS_TOKEN
-
 # Deploy
 npm run cf:deploy
 ```
+
+**Important Notes:**
+- Cloudflare Workers **only supports HTTP transport** (no stdio or SSE)
+- **Multi-user authentication**: Each user provides their own Fizzy token via `Authorization: Bearer <token>` header
+- **No FIZZY_ACCESS_TOKEN needed**: Unlike stdio transport, Cloudflare deployment uses per-user tokens
+- **Durable Objects**: Sessions are managed using Cloudflare Durable Objects for persistence
 
 See the [Cloudflare Deployment Guide](docs/CLOUDFLARE.md) for detailed instructions.
 
@@ -301,9 +442,11 @@ See the [Cloudflare Deployment Guide](docs/CLOUDFLARE.md) for detailed instructi
 
 ## Environment Variables
 
+### Core Configuration
+
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `FIZZY_ACCESS_TOKEN` | **Yes** | — | Your Fizzy API access token (required for all operations) |
+| `FIZZY_ACCESS_TOKEN` | **stdio only** | — | Your Fizzy API access token (**required for stdio transport only**). HTTP/SSE users provide tokens via Authorization header. |
 | `FIZZY_BASE_URL` | No | `https://app.fizzy.do` | Fizzy API base URL |
 | `PORT` | No | `3000` | Port for HTTP/SSE transport |
 | `MCP_TRANSPORT` | No | `stdio` | Default transport (stdio, sse, http) |
@@ -316,7 +459,7 @@ When using HTTP or SSE transports, additional security options are available:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `MCP_ALLOWED_ORIGINS` | No | `*` | Allowed CORS origins (comma-separated or `*` for all) |
-| `MCP_AUTH_TOKEN` | No | — | Bearer token for Client Authentication (authenticates MCP clients) |
+| `MCP_AUTH_TOKEN` | No | — | Optional bearer token for Client Authentication (authenticates MCP clients connecting to this server) |
 | `MCP_BIND_ALL_INTERFACES` | No | `false` | Set to `true` to bind to 0.0.0.0 instead of localhost |
 
 **Multi-User Support:**
@@ -519,10 +662,43 @@ Your access token is stored in your local IDE configuration and is never sent an
 Yes! You can configure multiple MCP server instances in your IDE, each with a different access token. Just give them different names in the configuration (e.g., "fizzy-personal", "fizzy-work").
 
 ### What's the difference between the transport modes?
-- **stdio** (default): For IDE integration (Cursor, VS Code, Claude Desktop). Communication happens via standard input/output.
-- **sse**: For web clients that need server-sent events. Runs an HTTP server with SSE endpoints.
-- **http**: For production deployments. Runs an HTTP server with streamable endpoints and health checks.
-- **cloudflare**: For edge deployment. Uses Cloudflare Workers with Durable Objects for session management. Provides global distribution, auto-scaling, and near-zero cold starts.
+- **stdio** (default): For single-user IDE integration (Cursor, VS Code, Claude Desktop). Communication happens via standard input/output. Requires `FIZZY_ACCESS_TOKEN` environment variable.
+- **http** (Streamable HTTP): **Recommended for production**. Multi-user support with per-user authentication via Authorization headers. Runs an HTTP server with streamable endpoints and health checks. Supported on both Node.js and Cloudflare Workers.
+- **sse** (Server-Sent Events): **⚠️ Deprecated** - maintained for backwards compatibility only. Multi-user support but uses older protocol version (2024-11-05). Only supported on Node.js. Use HTTP transport instead.
+
+### Which transport should I use?
+- **For IDE integrations** (Cursor, VS Code, Claude Desktop): Use **stdio**
+- **For production deployments**: Use **HTTP (Streamable)**
+- **For multi-user applications**: Use **HTTP (Streamable)**
+- **For testing with MCP Inspector**: Use **HTTP (Streamable)**
+- **For Cloudflare Workers deployment**: Use **HTTP (Streamable)** (only option)
+
+### How do I test with MCP Inspector?
+[MCP Inspector](https://github.com/modelcontextprotocol/inspector) is a tool for testing MCP servers. Here's how to use it with Fizzy MCP:
+
+**1. Start the HTTP server:**
+```bash
+npm run build
+npm run start:http
+# Server runs on http://localhost:3000
+```
+
+**2. Launch MCP Inspector:**
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+**3. Configure the connection:**
+- **Transport**: Select "HTTP"
+- **URL**: `http://localhost:3000/mcp`
+- **Headers**: Add `Authorization: Bearer YOUR_FIZZY_TOKEN`
+
+**4. Test the connection:**
+- Click "Connect"
+- You should see the list of 47 available tools
+- Try calling tools like `fizzy_get_identity` or `fizzy_get_boards`
+
+**Note**: MCP Inspector does not support the deprecated SSE transport. Always use HTTP transport for testing.
 
 ### Does this work offline?
 No, the server requires an internet connection to communicate with Fizzy's API at `app.fizzy.do`.
