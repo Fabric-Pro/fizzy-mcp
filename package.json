@@ -28,7 +28,7 @@
     "link:global": "npm run build && npm link",
     "unlink:global": "npm unlink -g fizzy-mcp",
     "cf:dev": "wrangler dev",
-    "cf:deploy": "wrangler deploy",
+    "cf:deploy": "echo 'Error: Use cf:deploy:staging or cf:deploy:production' && exit 1",
     "cf:deploy:staging": "wrangler deploy --env staging",
     "cf:deploy:production": "wrangler deploy --env production",
     "cf:tail": "wrangler tail",
