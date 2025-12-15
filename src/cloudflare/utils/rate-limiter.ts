@@ -156,7 +156,7 @@ export class RateLimiter {
 
   constructor(
     namespace: DurableObjectNamespace,
-    defaultConfig: RateLimitConfig = { limit: 100, windowSeconds: 60 }
+    defaultConfig: RateLimitConfig = { limit: 10000, windowSeconds: 60 }
   ) {
     this.namespace = namespace;
     this.defaultConfig = defaultConfig;
@@ -281,19 +281,22 @@ export async function checkRateLimit(
  * Default rate limit configurations
  */
 export const RATE_LIMIT_CONFIGS = {
-  /** Standard API rate limit: 100 requests per minute */
-  standard: { limit: 100, windowSeconds: 60 } as RateLimitConfig,
+  /** Standard API rate limit: 10000 requests per minute */
+  standard: { limit: 10000, windowSeconds: 60 } as RateLimitConfig,
   
   /** Strict rate limit for sensitive operations: 10 per minute */
   strict: { limit: 10, windowSeconds: 60 } as RateLimitConfig,
   
-  /** Lenient rate limit: 1000 requests per minute */
-  lenient: { limit: 1000, windowSeconds: 60 } as RateLimitConfig,
+  /** Lenient rate limit: 50000 requests per minute */
+  lenient: { limit: 50000, windowSeconds: 60 } as RateLimitConfig,
   
-  /** Burst rate limit: 20 requests per second */
-  burst: { limit: 20, windowSeconds: 1 } as RateLimitConfig,
+  /** Burst rate limit: 200 requests per second */
+  burst: { limit: 200, windowSeconds: 1 } as RateLimitConfig,
   
-  /** Daily rate limit: 10000 requests per day */
-  daily: { limit: 10000, windowSeconds: 86400 } as RateLimitConfig,
+  /** Daily rate limit: 1000000 requests per day */
+  daily: { limit: 1000000, windowSeconds: 86400 } as RateLimitConfig,
+  
+  /** Legacy rate limit: 100 requests per minute (original default) */
+  legacy: { limit: 100, windowSeconds: 60 } as RateLimitConfig,
 } as const;
 
