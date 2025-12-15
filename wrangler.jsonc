@@ -9,7 +9,7 @@
   "vars": {
     "FIZZY_BASE_URL": "https://app.fizzy.do",
     "LOG_LEVEL": "info",
-    "RATE_LIMIT_RPM": "100",
+    "RATE_LIMIT_RPM": "10000",
     "ENABLE_CACHE": "true",
     "ENABLE_RATE_LIMIT": "true"
   },
@@ -84,7 +84,7 @@
       "vars": {
         "FIZZY_BASE_URL": "https://app.fizzy.do",
         "LOG_LEVEL": "warn",
-        "RATE_LIMIT_RPM": "100",
+        "RATE_LIMIT_RPM": "10000",
         "ENABLE_CACHE": "true",
         "ENABLE_RATE_LIMIT": "true"
       },
@@ -128,7 +128,7 @@
       "vars": {
         "FIZZY_BASE_URL": "https://app.fizzy.do",
         "LOG_LEVEL": "debug",
-        "RATE_LIMIT_RPM": "200",
+        "RATE_LIMIT_RPM": "10000",
         "ENABLE_CACHE": "true",
         "ENABLE_RATE_LIMIT": "true"
       },
