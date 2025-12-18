@@ -316,7 +316,7 @@ export default {
         const fizzyToken = extractFizzyToken(request);
         if (fizzyToken) {
           const rateLimiter = new RateLimiter(env.RATE_LIMITER, {
-            limit: parseInt(env.RATE_LIMIT_RPM || "100", 10),
+            limit: parseInt(env.RATE_LIMIT_RPM || "10000", 10),
             windowSeconds: 60,
           });
 

@@ -135,6 +135,9 @@ export class FizzyClient {
    * The Fizzy API returns slugs like "/6117483" but API paths need "6117483"
    */
   private normalizeSlug(slug: string): string {
+    if (!slug) {
+      throw new Error("Account slug is required");
+    }
     return slug.startsWith("/") ? slug.slice(1) : slug;
   }
 

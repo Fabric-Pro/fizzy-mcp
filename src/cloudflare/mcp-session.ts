@@ -676,11 +676,13 @@ export class McpSessionDO extends DurableObject<Env> {
 
   /**
    * Helper to create JSON error response
+   * Note: id is set to null when the request id couldn't be determined (per JSON-RPC 2.0 spec)
    */
-  private jsonError(status: number, code: number, message: string): Response {
+  private jsonError(status: number, code: number, message: string, id: string | number | null = null): Response {
     return new Response(
       JSON.stringify({
         jsonrpc: "2.0",
+        id,
         error: { code, message },
       }),
       {

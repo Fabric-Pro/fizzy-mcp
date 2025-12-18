@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(src/client/**)",
+      "Bash(npm run build:*)",
+      "Bash(npm test:*)",
+      "Edit(src/cloudflare/**)"
+    ]
+  }
+}
