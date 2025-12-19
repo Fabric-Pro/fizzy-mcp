@@ -4,7 +4,12 @@
       "Edit(src/client/**)",
       "Bash(npm run build:*)",
       "Bash(npm test:*)",
-      "Edit(src/cloudflare/**)"
+      "Edit(src/cloudflare/**)",
+      "Bash(grep:*)",
+      "Bash(npm list:*)",
+      "Bash(cd node_modules/@modelcontextprotocol/sdk && find . -name \"*.d.ts\" | head -5)",
+      "Bash(find:*)",
+      "Edit(src/tools/**)"
     ]
   }
 }
