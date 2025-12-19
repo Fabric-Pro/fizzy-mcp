@@ -9,7 +9,15 @@
       "Bash(npm list:*)",
       "Bash(cd node_modules/@modelcontextprotocol/sdk && find . -name \"*.d.ts\" | head -5)",
       "Bash(find:*)",
-      "Edit(src/tools/**)"
+      "Edit(src/tools/**)",
+      "Edit(src/**)",
+      "Bash(cd /home/preddy/Development/fizzy-mcp && sed -i 's/async ({ \\([^}]*\\) }) =>/async ({ \\1 }: any) =>/g' src/server.ts)",
+      "Bash(cd /home/preddy/Development/fizzy-mcp && wc -l src/server.ts src/server.ts.backup src/cloudflare/mcp-session.ts src/tools/definitions.ts src/tools/schemas.ts 2>/dev/null | tail -1)",
+      "Bash(lsof -ti:3100,3200 2>/dev/null | xargs kill -9 2>/dev/null; echo \"Ports cleaned\")",
+      "Bash(cd /home/preddy/Development/fizzy-mcp && npx tsx test-tool-registration.ts 2>&1)",
+      "Bash(cd /home/preddy/Development/fizzy-mcp && npx tsx test-tools-list.ts 2>&1)",
+      "Bash(cd /home/preddy/Development/fizzy-mcp && npx vitest run verify-refactoring.test.ts 2>&1)",
+      "Edit(tests/**)"
     ]
   }
 }

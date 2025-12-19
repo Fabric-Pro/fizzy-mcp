@@ -15,6 +15,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { FizzyClient } from "../client/fizzy-client.js";
 import type {
   Env,
@@ -36,6 +37,7 @@ import {
   type CloudflareAnalytics,
   type LogLevel,
 } from "./utils/index.js";
+import { ALL_TOOLS } from "../tools/definitions.js";
 
 /**
  * Session timeout in milliseconds (30 minutes)
@@ -282,84 +284,45 @@ export class McpSessionDO extends DurableObject<Env> {
 
   /**
    * Get tool definitions
+   * 
+   * Uses centralized tool definitions from tools/definitions.ts and converts
+   * Zod schemas to JSON Schema for MCP protocol compatibility.
    */
   private getToolDefinitions(): Array<{
     name: string;
+    title?: string;
     description: string;
     inputSchema: Record<string, unknown>;
+    annotations?: {
+      readOnlyHint?: boolean;
+      destructiveHint?: boolean;
+    };
   }> {
-    return [
-      // Identity Tools
-      { name: "fizzy_get_identity", description: "Get the current authenticated user's identity and associated accounts", inputSchema: { type: "object", properties: {}, required: [] } },
-      { name: "fizzy_get_accounts", description: "Get all accounts accessible to the current user", inputSchema: { type: "object", properties: {}, required: [] } },
-      
-      // Board Tools
-      { name: "fizzy_get_boards", description: "Get all boards in an account", inputSchema: { type: "object", properties: { account_slug: { type: "string", description: "The account slug identifier" } }, required: ["account_slug"] } },
-      { name: "fizzy_get_board", description: "Get details of a specific board", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, board_id: { type: "string" } }, required: ["account_slug", "board_id"] } },
-      { name: "fizzy_create_board", description: "Create a new board in an account", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, name: { type: "string" } }, required: ["account_slug", "name"] } },
-      { name: "fizzy_update_board", description: "Update an existing board", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, board_id: { type: "string" }, name: { type: "string" } }, required: ["account_slug", "board_id", "name"] } },
-      { name: "fizzy_delete_board", description: "Delete a board", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, board_id: { type: "string" } }, required: ["account_slug", "board_id"] } },
-      
-      // Card Tools
-      { name: "fizzy_get_cards", description: "Get all cards in an account, optionally filtered by status, column, assignees, or tags", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, status: { type: "string", enum: ["draft", "published", "archived"] }, column_id: { type: "string" }, assignee_ids: { type: "array", items: { type: "string" } }, tag_ids: { type: "array", items: { type: "string" } }, search: { type: "string" } }, required: ["account_slug"] } },
-      { name: "fizzy_get_card", description: "Get details of a specific card including its description, assignees, and tags", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_id: { type: "string" } }, required: ["account_slug", "card_id"] } },
-      { name: "fizzy_create_card", description: "Create a new card on a board", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, board_id: { type: "string" }, title: { type: "string" }, description: { type: "string" }, status: { type: "string" }, column_id: { type: "string" }, assignee_ids: { type: "array", items: { type: "string" } }, tag_ids: { type: "array", items: { type: "string" } }, due_on: { type: "string" } }, required: ["account_slug", "board_id", "title"] } },
-      { name: "fizzy_update_card", description: "Update an existing card's title, description, status, column, assignees, tags, or due date", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_id: { type: "string" }, title: { type: "string" }, description: { type: "string" }, status: { type: "string" }, column_id: { type: "string" }, assignee_ids: { type: "array", items: { type: "string" } }, tag_ids: { type: "array", items: { type: "string" } }, due_on: { type: "string" } }, required: ["account_slug", "card_id"] } },
-      { name: "fizzy_delete_card", description: "Delete a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_id: { type: "string" } }, required: ["account_slug", "card_id"] } },
-      
-      // Comment Tools
-      { name: "fizzy_get_card_comments", description: "Get all comments on a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_id: { type: "string" } }, required: ["account_slug", "card_id"] } },
-      { name: "fizzy_create_comment", description: "Add a comment to a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_id: { type: "string" }, body: { type: "string" } }, required: ["account_slug", "card_id", "body"] } },
-      { name: "fizzy_delete_comment", description: "Delete a comment", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, comment_id: { type: "string" } }, required: ["account_slug", "comment_id"] } },
-      
-      // Column Tools  
-      { name: "fizzy_get_columns", description: "Get all columns on a board (workflow stages)", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, board_id: { type: "string" } }, required: ["account_slug", "board_id"] } },
-      { name: "fizzy_get_column", description: "Get details of a specific column", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, board_id: { type: "string" }, column_id: { type: "string" } }, required: ["account_slug", "board_id", "column_id"] } },
-      { name: "fizzy_create_column", description: "Create a new column on a board", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, board_id: { type: "string" }, name: { type: "string" }, color: { type: "string", enum: ["blue", "gray", "tan", "yellow", "lime", "aqua", "violet", "purple", "pink"] } }, required: ["account_slug", "board_id", "name"] } },
-      { name: "fizzy_update_column", description: "Update a column's name or color", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, board_id: { type: "string" }, column_id: { type: "string" }, name: { type: "string" }, color: { type: "string" } }, required: ["account_slug", "board_id", "column_id"] } },
-      { name: "fizzy_delete_column", description: "Delete a column from a board", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, board_id: { type: "string" }, column_id: { type: "string" } }, required: ["account_slug", "board_id", "column_id"] } },
-      
-      // Tag Tools
-      { name: "fizzy_get_tags", description: "Get all tags in an account", inputSchema: { type: "object", properties: { account_slug: { type: "string" } }, required: ["account_slug"] } },
-      
-      // User Tools
-      { name: "fizzy_get_users", description: "Get all active users in an account", inputSchema: { type: "object", properties: { account_slug: { type: "string" } }, required: ["account_slug"] } },
-      { name: "fizzy_get_user", description: "Get details of a specific user", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, user_id: { type: "string" } }, required: ["account_slug", "user_id"] } },
-      { name: "fizzy_update_user", description: "Update a user's display name", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, user_id: { type: "string" }, name: { type: "string" } }, required: ["account_slug", "user_id", "name"] } },
-      { name: "fizzy_deactivate_user", description: "Deactivate a user from an account", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, user_id: { type: "string" } }, required: ["account_slug", "user_id"] } },
-      
-      // Notification Tools
-      { name: "fizzy_get_notifications", description: "Get all notifications for the current user in an account", inputSchema: { type: "object", properties: { account_slug: { type: "string" } }, required: ["account_slug"] } },
-      { name: "fizzy_mark_notification_read", description: "Mark a notification as read", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, notification_id: { type: "string" } }, required: ["account_slug", "notification_id"] } },
-      { name: "fizzy_mark_notification_unread", description: "Mark a notification as unread", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, notification_id: { type: "string" } }, required: ["account_slug", "notification_id"] } },
-      { name: "fizzy_mark_all_notifications_read", description: "Mark all notifications as read in an account", inputSchema: { type: "object", properties: { account_slug: { type: "string" } }, required: ["account_slug"] } },
-      
-      // Card Action Tools
-      { name: "fizzy_close_card", description: "Close a card (mark as done)", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" } }, required: ["account_slug", "card_number"] } },
-      { name: "fizzy_reopen_card", description: "Reopen a closed card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" } }, required: ["account_slug", "card_number"] } },
-      { name: "fizzy_move_card_to_not_now", description: "Move a card to 'Not Now' triage", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" } }, required: ["account_slug", "card_number"] } },
-      { name: "fizzy_move_card_to_column", description: "Move a card from triage to a specific column", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, column_id: { type: "string" } }, required: ["account_slug", "card_number", "column_id"] } },
-      { name: "fizzy_send_card_to_triage", description: "Send a card back to triage (remove from column)", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" } }, required: ["account_slug", "card_number"] } },
-      { name: "fizzy_toggle_card_tag", description: "Toggle a tag on/off for a card. If the tag doesn't exist, it will be created.", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, tag_title: { type: "string" } }, required: ["account_slug", "card_number", "tag_title"] } },
-      { name: "fizzy_toggle_card_assignment", description: "Toggle a user assignment on/off for a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, assignee_id: { type: "string" } }, required: ["account_slug", "card_number", "assignee_id"] } },
-      { name: "fizzy_watch_card", description: "Subscribe to notifications for a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" } }, required: ["account_slug", "card_number"] } },
-      { name: "fizzy_unwatch_card", description: "Unsubscribe from notifications for a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" } }, required: ["account_slug", "card_number"] } },
-      
-      // Additional Comment Tools
-      { name: "fizzy_get_comment", description: "Get a specific comment on a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, comment_id: { type: "string" } }, required: ["account_slug", "card_number", "comment_id"] } },
-      { name: "fizzy_update_comment", description: "Update a comment on a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, comment_id: { type: "string" }, body: { type: "string" } }, required: ["account_slug", "card_number", "comment_id", "body"] } },
-      
-      // Reaction Tools
-      { name: "fizzy_get_reactions", description: "Get all reactions on a comment", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, comment_id: { type: "string" } }, required: ["account_slug", "card_number", "comment_id"] } },
-      { name: "fizzy_add_reaction", description: "Add a reaction to a comment (max 16 characters)", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, comment_id: { type: "string" }, content: { type: "string", maxLength: 16 } }, required: ["account_slug", "card_number", "comment_id", "content"] } },
-      { name: "fizzy_remove_reaction", description: "Remove an emoji reaction from a comment", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, comment_id: { type: "string" }, reaction_id: { type: "string" } }, required: ["account_slug", "card_number", "comment_id", "reaction_id"] } },
-      
-      // Step Tools
-      { name: "fizzy_get_step", description: "Get a specific to-do step on a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, step_id: { type: "string" } }, required: ["account_slug", "card_number", "step_id"] } },
-      { name: "fizzy_create_step", description: "Create a new to-do step on a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, description: { type: "string" } }, required: ["account_slug", "card_number", "description"] } },
-      { name: "fizzy_update_step", description: "Update a to-do step on a card (e.g., mark complete)", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, step_id: { type: "string" }, description: { type: "string" }, completed: { type: "boolean" } }, required: ["account_slug", "card_number", "step_id"] } },
-      { name: "fizzy_delete_step", description: "Delete a to-do step from a card", inputSchema: { type: "object", properties: { account_slug: { type: "string" }, card_number: { type: "string" }, step_id: { type: "string" } }, required: ["account_slug", "card_number", "step_id"] } },
-    ];
+    return ALL_TOOLS.map((toolDef) => {
+      // Convert Zod schema to JSON Schema
+      const jsonSchema = zodToJsonSchema(toolDef.schema, {
+        target: "jsonSchema2019-09",
+        $refStrategy: "none",
+      });
+
+      // Remove $schema field (MCP defaults to 2020-12)
+      if ("$schema" in jsonSchema) {
+        delete jsonSchema.$schema;
+      }
+
+      // Add strict mode (additionalProperties: false)
+      if (jsonSchema.type === "object") {
+        jsonSchema.additionalProperties = false;
+      }
+
+      return {
+        name: toolDef.name,
+        title: toolDef.title,
+        description: toolDef.description,
+        inputSchema: jsonSchema as Record<string, unknown>,
+        annotations: toolDef.annotations,
+      };
+    });
   }
 
   /**
