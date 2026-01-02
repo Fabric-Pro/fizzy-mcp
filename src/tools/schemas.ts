@@ -81,6 +81,20 @@ export const cardStatusFilterSchema = z
     "'draft' = unpublished cards, 'published' = active cards, 'archived' = closed cards"
   );
 
+// Indexed by schema for special card filters
+export const indexedBySchema = z
+  .enum(["all", "closed", "not_now", "stalled", "postponing_soon", "golden"])
+  .optional()
+  .describe(
+    "Filter cards by special index. Options: " +
+    "'all' = all cards including closed, " +
+    "'closed' = only closed/archived cards, " +
+    "'not_now' = cards in Not Now triage, " +
+    "'stalled' = cards with no recent activity, " +
+    "'postponing_soon' = cards with upcoming due dates, " +
+    "'golden' = priority/important cards marked as golden"
+  );
+
 // Column color schema with visual context
 export const columnColorSchema = z
   .enum(["blue", "gray", "tan", "yellow", "lime", "aqua", "violet", "purple", "pink"])
@@ -126,6 +140,7 @@ export const deleteBoardSchema = z.object({
 // Card schemas with comprehensive descriptions
 export const getCardsSchema = z.object({
   account_slug: accountSlugSchema,
+  indexed_by: indexedBySchema,
   status: cardStatusFilterSchema,
   column_id: z.string().optional().describe(
     "Filter cards by workflow column. Only returns cards in the specified column. " +
@@ -151,7 +166,7 @@ export const getCardsSchema = z.object({
 
 export const getCardSchema = z.object({
   account_slug: accountSlugSchema,
-  card_id: cardIdSchema,
+  card_id: cardNumberSchema,
 });
 
 export const createCardSchema = z.object({
@@ -191,7 +206,7 @@ export const createCardSchema = z.object({
 
 export const updateCardSchema = z.object({
   account_slug: accountSlugSchema,
-  card_id: cardIdSchema,
+  card_id: cardNumberSchema,
   title: z.string().optional().describe(
     "New card title. Omit to keep current title unchanged."
   ),
@@ -225,7 +240,7 @@ export const updateCardSchema = z.object({
 
 export const deleteCardSchema = z.object({
   account_slug: accountSlugSchema,
-  card_id: cardIdSchema,
+  card_id: cardNumberSchema,
 });
 
 // Comment schemas with HTML formatting guidance
@@ -442,8 +457,8 @@ export const getStepSchema = z.object({
 export const createStepSchema = z.object({
   account_slug: accountSlugSchema,
   card_number: cardNumberSchema,
-  description: z.string().describe(
-    "The to-do step description (required). Keep concise - steps are checklist items. " +
+  content: z.string().describe(
+    "The to-do step content (required). Keep concise - steps are checklist items. " +
     "Examples: 'Review PR', 'Update tests', 'Deploy to staging'. " +
     "Steps are created as incomplete by default."
   ),
@@ -453,8 +468,8 @@ export const updateStepSchema = z.object({
   account_slug: accountSlugSchema,
   card_number: cardNumberSchema,
   step_id: stepIdSchema,
-  description: z.string().optional().describe(
-    "New step description. Omit to keep current description unchanged."
+  content: z.string().optional().describe(
+    "New step content. Omit to keep current content unchanged."
   ),
   completed: z.boolean().optional().describe(
     "Completion status. true = mark as complete/done, false = mark as incomplete/pending. " +
@@ -466,5 +481,17 @@ export const deleteStepSchema = z.object({
   account_slug: accountSlugSchema,
   card_number: cardNumberSchema,
   step_id: stepIdSchema,
+});
+
+// ============ Golden Card schemas ============
+
+export const gildCardSchema = z.object({
+  account_slug: accountSlugSchema,
+  card_number: cardNumberSchema,
+});
+
+export const ungildCardSchema = z.object({
+  account_slug: accountSlugSchema,
+  card_number: cardNumberSchema,
 });
 

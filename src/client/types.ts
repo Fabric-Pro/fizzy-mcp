@@ -212,6 +212,7 @@ export interface FizzyIdentity {
 // Card filtering options
 export interface CardFilterOptions {
   [key: string]: string | string[] | undefined;
+  indexed_by?: "all" | "closed" | "not_now" | "stalled" | "postponing_soon" | "golden";
   status?: "draft" | "published" | "archived";
   column_id?: string;
   assignee_ids?: string[];

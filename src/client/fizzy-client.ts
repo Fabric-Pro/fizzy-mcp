@@ -661,6 +661,24 @@ export class FizzyClient {
     await this.request<void>("DELETE", `/${slug}/cards/${cardNumber}/watch`);
   }
 
+  /**
+   * Mark a card as golden (priority/important)
+   * @endpoint POST /:account_slug/cards/:card_number/goldness
+   */
+  async gildCard(accountSlug: string, cardNumber: string): Promise<void> {
+    const slug = this.normalizeSlug(accountSlug);
+    await this.request<void>("POST", `/${slug}/cards/${cardNumber}/goldness`);
+  }
+
+  /**
+   * Remove golden status from a card
+   * @endpoint DELETE /:account_slug/cards/:card_number/goldness
+   */
+  async ungildCard(accountSlug: string, cardNumber: string): Promise<void> {
+    const slug = this.normalizeSlug(accountSlug);
+    await this.request<void>("DELETE", `/${slug}/cards/${cardNumber}/goldness`);
+  }
+
   // ============ Comments ============
 
   /**

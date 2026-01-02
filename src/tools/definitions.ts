@@ -128,7 +128,8 @@ export const TOOL_DEFINITIONS = {
       name: "fizzy_get_cards",
       title: "List Cards",
       description:
-        "Get all cards in an account with optional filtering by status, column, assignees, tags, or search query. " +
+        "Get all cards in an account with optional filtering by indexed_by (e.g., 'golden' for priority cards), " +
+        "status, column, assignees, tags, or search query. " +
         "Returns card summaries including titles, statuses, and assignments. " +
         "Supports pagination and filtering for large datasets.",
       schema: schemas.getCardsSchema,
@@ -295,6 +296,30 @@ export const TOOL_DEFINITIONS = {
         "Unsubscribe from notifications for a card. You'll stop receiving updates about card changes. " +
         "Use this to reduce notification noise for cards you're no longer actively involved with.",
       schema: schemas.unwatchCardSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    {
+      name: "fizzy_gild_card",
+      title: "Gild Card",
+      description:
+        "Mark a card as golden (priority/important). Golden cards are highlighted and can be filtered " +
+        "using indexed_by='golden' in fizzy_get_cards. Use this to flag high-priority work items.",
+      schema: schemas.gildCardSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    {
+      name: "fizzy_ungild_card",
+      title: "Ungild Card",
+      description:
+        "Remove golden status from a card. The card will no longer appear in golden card filters " +
+        "and will lose its priority highlighting.",
+      schema: schemas.ungildCardSchema,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
