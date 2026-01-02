@@ -95,8 +95,9 @@ export function createFizzyServer(client: FizzyClient): McpServer {
     },
 
     // ============ Card Tools ============
-    fizzy_get_cards: async ({ account_slug, status, column_id, assignee_ids, tag_ids, search }: any) => {
+    fizzy_get_cards: async ({ account_slug, indexed_by, status, column_id, assignee_ids, tag_ids, search }: any) => {
       const cards = await client.getCards(account_slug, {
+        indexed_by,
         status,
         column_id,
         assignee_ids,
@@ -236,6 +237,20 @@ export function createFizzyServer(client: FizzyClient): McpServer {
       };
     },
 
+    fizzy_gild_card: async ({ account_slug, card_number }: any) => {
+      await client.gildCard(account_slug, card_number);
+      return {
+        content: [{ type: "text", text: `Card ${card_number} marked as golden` }],
+      };
+    },
+
+    fizzy_ungild_card: async ({ account_slug, card_number }: any) => {
+      await client.ungildCard(account_slug, card_number);
+      return {
+        content: [{ type: "text", text: `Card ${card_number} golden status removed` }],
+      };
+    },
+
     // ============ Comment Tools ============
     fizzy_get_card_comments: async ({ account_slug, card_id }: any) => {
       const comments = await client.getCardComments(account_slug, card_id);
@@ -302,15 +317,15 @@ export function createFizzyServer(client: FizzyClient): McpServer {
       };
     },
 
-    fizzy_create_step: async ({ account_slug, card_number, description }: any) => {
-      const step = await client.createStep(account_slug, card_number, { description });
+    fizzy_create_step: async ({ account_slug, card_number, content }: any) => {
+      const step = await client.createStep(account_slug, card_number, { description: content });
       return {
         content: [{ type: "text", text: JSON.stringify(step, null, 2) }],
       };
     },
 
-    fizzy_update_step: async ({ account_slug, card_number, step_id, description, completed }: any) => {
-      await client.updateStep(account_slug, card_number, step_id, { description, completed });
+    fizzy_update_step: async ({ account_slug, card_number, step_id, content, completed }: any) => {
+      await client.updateStep(account_slug, card_number, step_id, { description: content, completed });
       return {
         content: [{ type: "text", text: `Step ${step_id} updated` }],
       };
