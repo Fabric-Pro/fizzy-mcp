@@ -34,6 +34,7 @@ export interface FizzyBoard {
 
 export interface FizzyCard {
   id: string;
+  number?: number;
   title: string;
   description?: string;
   status: "draft" | "published" | "archived";
@@ -221,4 +222,3 @@ export interface CardFilterOptions {
   due_after?: string;
   search?: string;
 }
-

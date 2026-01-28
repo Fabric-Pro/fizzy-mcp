@@ -16,7 +16,7 @@
  * CARDS:        GET /:slug/cards, GET /:slug/boards/:id/cards, GET/PUT/DELETE /:slug/cards/:id
  *               POST /:slug/boards/:board_id/cards
  * CARD ACTIONS: POST/DELETE /:slug/cards/:number/closure|not_now|triage|taggings|assignments|watch
- * COMMENTS:     GET/POST /:slug/cards/:id/comments
+ * COMMENTS:     GET/POST /:slug/cards/:number/comments
  *               GET/PUT /:slug/cards/:number/comments/:id
  *               DELETE /:slug/comments/:id
  * REACTIONS:    GET/POST /:slug/cards/:number/comments/:id/reactions
@@ -291,11 +291,11 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
 
       mockFetch.mockResolvedValueOnce(mockResponse(mockComments));
 
-      const result = await client.getCardComments("123", "card1");
+      const result = await client.getCardComments("123", "42");
 
       expect(result).toEqual(mockComments);
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1/comments",
+        "https://app.fizzy.do/123/cards/42/comments",
         expect.any(Object)
       );
     });
@@ -305,13 +305,13 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
 
       mockFetch.mockResolvedValueOnce(mockResponse(mockComment, 201));
 
-      const result = await client.createCardComment("123", "card1", {
+      const result = await client.createCardComment("123", "42", {
         body: "New comment",
       });
 
       expect(result).toEqual(mockComment);
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1/comments",
+        "https://app.fizzy.do/123/cards/42/comments",
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({ comment: { body: "New comment" } }),

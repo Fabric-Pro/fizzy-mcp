@@ -37,9 +37,9 @@
  *   DELETE /:account_slug/cards/:card_number/watch       - Unwatch card
  * 
  * COMMENTS
- *   GET    /:account_slug/cards/:card_id/comments                  - List comments
+ *   GET    /:account_slug/cards/:card_number/comments              - List comments
  *   GET    /:account_slug/cards/:card_number/comments/:comment_id  - Get comment
- *   POST   /:account_slug/cards/:card_id/comments                  - Create comment
+ *   POST   /:account_slug/cards/:card_number/comments              - Create comment
  *   PUT    /:account_slug/cards/:card_number/comments/:comment_id  - Update comment
  *   DELETE /:account_slug/comments/:comment_id                     - Delete comment
  * 
@@ -515,7 +515,7 @@ describe("FizzyClient", () => {
    * DELETE /:account_slug/cards/:card_number/comments/:comment_id    - Delete comment
    */
   describe("Comments", () => {
-    // Expected URL: GET /:account_slug/cards/:card_id/comments
+    // Expected URL: GET /:account_slug/cards/:card_number/comments
     it("should get card comments", async () => {
       const mockComments = [{ id: "comment1", body: "Comment 1" }];
 
@@ -525,10 +525,10 @@ describe("FizzyClient", () => {
         json: async () => mockComments,
       });
 
-      const result = await client.getCardComments("123", "card1");
+      const result = await client.getCardComments("123", "42");
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1/comments",
+        "https://app.fizzy.do/123/cards/42/comments",
         expect.any(Object)
       );
       expect(result).toEqual(mockComments);
@@ -543,12 +543,12 @@ describe("FizzyClient", () => {
         json: async () => mockComment,
       });
 
-      const result = await client.createCardComment("123", "card1", {
+      const result = await client.createCardComment("123", "42", {
         body: "New Comment",
       });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1/comments",
+        "https://app.fizzy.do/123/cards/42/comments",
         expect.objectContaining({
           method: "POST",
         })

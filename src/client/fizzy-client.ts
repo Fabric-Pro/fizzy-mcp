@@ -683,34 +683,34 @@ export class FizzyClient {
 
   /**
    * Get all comments on a card
-   * @endpoint GET /:account_slug/cards/:card_id/comments
-   * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#get-account_slugcardscard_idcomments
+   * @endpoint GET /:account_slug/cards/:card_number/comments
+   * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#get-account_slugcardscard_numbercomments
    */
   async getCardComments(
     accountSlug: string,
-    cardId: string
+    cardNumber: string
   ): Promise<FizzyComment[]> {
     const slug = this.normalizeSlug(accountSlug);
     return this.request<FizzyComment[]>(
       "GET",
-      `/${slug}/cards/${cardId}/comments`
+      `/${slug}/cards/${cardNumber}/comments`
     );
   }
 
   /**
    * Create a comment on a card
-   * @endpoint POST /:account_slug/cards/:card_id/comments
-   * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#post-account_slugcardscard_idcomments
+   * @endpoint POST /:account_slug/cards/:card_number/comments
+   * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#post-account_slugcardscard_numbercomments
    */
   async createCardComment(
     accountSlug: string,
-    cardId: string,
+    cardNumber: string,
     data: CreateCommentRequest
   ): Promise<FizzyComment> {
     const slug = this.normalizeSlug(accountSlug);
     return this.request<FizzyComment>(
       "POST",
-      `/${slug}/cards/${cardId}/comments`,
+      `/${slug}/cards/${cardNumber}/comments`,
       { comment: data }
     );
   }

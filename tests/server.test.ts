@@ -38,11 +38,11 @@
  *   DELETE /:slug/cards/:n/watch       -> fizzy_unwatch_card
  * 
  * COMMENTS (5 tools)
- *   GET    /:slug/cards/:id/comments       -> fizzy_get_card_comments
+ *   GET    /:slug/cards/:n/comments       -> fizzy_get_card_comments
  *   GET    /:slug/cards/:n/comments/:id    -> fizzy_get_comment
- *   POST   /:slug/cards/:id/comments       -> fizzy_create_card_comment
- *   PUT    /:slug/cards/:n/comments/:id    -> fizzy_update_comment
- *   DELETE /:slug/cards/:n/comments/:id    -> fizzy_delete_comment
+ *   POST   /:slug/cards/:n/comments       -> fizzy_create_card_comment
+ *   PUT    /:slug/cards/:n/comments/:id   -> fizzy_update_comment
+ *   DELETE /:slug/cards/:n/comments/:id   -> fizzy_delete_comment
  * 
  * REACTIONS (3 tools)
  *   GET    /:slug/cards/:n/comments/:id/reactions     -> fizzy_get_reactions
@@ -247,9 +247,9 @@ describe("API Coverage", () => {
       "DELETE /:account_slug/cards/:card_number/watch": "fizzy_unwatch_card",
       
       // Comments
-      "GET /:account_slug/cards/:card_id/comments": "fizzy_get_card_comments",
+      "GET /:account_slug/cards/:card_number/comments": "fizzy_get_card_comments",
       "GET /:account_slug/cards/:card_number/comments/:comment_id": "fizzy_get_comment",
-      "POST /:account_slug/cards/:card_id/comments": "fizzy_create_comment",
+      "POST /:account_slug/cards/:card_number/comments": "fizzy_create_comment",
       "PUT /:account_slug/cards/:card_number/comments/:comment_id": "fizzy_update_comment",
       "DELETE /:account_slug/cards/:card_number/comments/:comment_id": "fizzy_delete_comment",
       
@@ -291,4 +291,3 @@ describe("API Coverage", () => {
     expect(Object.keys(apiEndpoints)).toHaveLength(47);
   });
 });
-

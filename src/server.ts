@@ -10,6 +10,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { FizzyClient } from "./client/fizzy-client.js";
 import { COLUMN_COLORS, type ColumnColor } from "./client/types.js";
 import { ALL_TOOLS } from "./tools/definitions.js";
+import { resolveCardNumber } from "./utils/card-resolver.js";
 
 /**
  * Tool handler function type
@@ -252,8 +253,9 @@ export function createFizzyServer(client: FizzyClient): McpServer {
     },
 
     // ============ Comment Tools ============
-    fizzy_get_card_comments: async ({ account_slug, card_id }: any) => {
-      const comments = await client.getCardComments(account_slug, card_id);
+    fizzy_get_card_comments: async ({ account_slug, card_id, card_number }: any) => {
+      const resolvedCardNumber = await resolveCardNumber(client, account_slug, card_id, card_number);
+      const comments = await client.getCardComments(account_slug, resolvedCardNumber);
       return {
         content: [{ type: "text", text: JSON.stringify(comments, null, 2) }],
       };
@@ -266,8 +268,9 @@ export function createFizzyServer(client: FizzyClient): McpServer {
       };
     },
 
-    fizzy_create_comment: async ({ account_slug, card_id, body }: any) => {
-      const comment = await client.createCardComment(account_slug, card_id, { body });
+    fizzy_create_comment: async ({ account_slug, card_id, card_number, body }: any) => {
+      const resolvedCardNumber = await resolveCardNumber(client, account_slug, card_id, card_number);
+      const comment = await client.createCardComment(account_slug, resolvedCardNumber, { body });
       return {
         content: [{ type: "text", text: JSON.stringify(comment, null, 2) }],
       };

@@ -244,26 +244,37 @@ export const deleteCardSchema = z.object({
 });
 
 // Comment schemas with HTML formatting guidance
-export const getCardCommentsSchema = z.object({
+const commentCardSelectorBase = z.object({
   account_slug: accountSlugSchema,
-  card_id: cardIdSchema,
+  card_id: cardIdSchema.optional(),
+  card_number: cardNumberSchema.optional(),
 });
 
-export const createCommentSchema = z.object({
-  account_slug: accountSlugSchema,
-  card_id: cardIdSchema,
-  body: z.string().describe(
-    "Comment content (required). Supports HTML formatting: " +
-    "<b>bold</b>, <i>italic</i>, <a href='...'>links</a>, <code>code</code>, " +
-    "<ul><li>bullet lists</li></ul>, <ol><li>numbered lists</li></ol>, " +
-    "<pre>code blocks</pre>, <blockquote>quotes</blockquote>. " +
-    "Use plain text for simple comments."
-  ),
-});
+const cardSelectorRefinement = (data: { card_id?: string; card_number?: string }) =>
+  Boolean(data.card_id || data.card_number);
+
+const cardSelectorRefinementMessage = { message: "Provide either card_id or card_number." };
+
+export const getCardCommentsSchema = commentCardSelectorBase.refine(
+  cardSelectorRefinement,
+  cardSelectorRefinementMessage
+);
+
+export const createCommentSchema = commentCardSelectorBase
+  .extend({
+    body: z.string().describe(
+      "Comment content (required). Supports HTML formatting: " +
+      "<b>bold</b>, <i>italic</i>, <a href='...'>links</a>, <code>code</code>, " +
+      "<ul><li>bullet lists</li></ul>, <ol><li>numbered lists</li></ol>, " +
+      "<pre>code blocks</pre>, <blockquote>quotes</blockquote>. " +
+      "Use plain text for simple comments."
+    ),
+  })
+  .refine(cardSelectorRefinement, cardSelectorRefinementMessage);
 
 export const deleteCommentSchema = z.object({
   account_slug: accountSlugSchema,
-  card_number: cardIdSchema, // Card number required for delete endpoint
+  card_number: cardNumberSchema, // Card number required for delete endpoint
   comment_id: commentIdSchema,
 });
 
@@ -494,4 +505,3 @@ export const ungildCardSchema = z.object({
   account_slug: accountSlugSchema,
   card_number: cardNumberSchema,
 });
-

@@ -38,6 +38,7 @@ import {
   type LogLevel,
 } from "./utils/index.js";
 import { ALL_TOOLS } from "../tools/definitions.js";
+import { resolveCardNumber } from "../utils/card-resolver.js";
 
 /**
  * Session timeout in milliseconds (30 minutes)
@@ -491,9 +492,26 @@ export class McpSessionDO extends DurableObject<Env> {
 
       // Comments
       case "fizzy_get_card_comments":
-        return this.client.getCardComments(args.account_slug as string, args.card_id as string);
+        return this.client.getCardComments(
+          args.account_slug as string,
+          await resolveCardNumber(
+            this.client,
+            args.account_slug as string,
+            args.card_id as string | undefined,
+            args.card_number as string | undefined
+          )
+        );
       case "fizzy_create_comment":
-        return this.client.createCardComment(args.account_slug as string, args.card_id as string, { body: args.body as string });
+        return this.client.createCardComment(
+          args.account_slug as string,
+          await resolveCardNumber(
+            this.client,
+            args.account_slug as string,
+            args.card_id as string | undefined,
+            args.card_number as string | undefined
+          ),
+          { body: args.body as string }
+        );
       case "fizzy_get_comment":
         return this.client.getComment(args.account_slug as string, args.card_number as string, args.comment_id as string);
       case "fizzy_update_comment":

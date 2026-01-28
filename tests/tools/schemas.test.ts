@@ -165,17 +165,27 @@ describe("Tool Schemas", () => {
   });
 
   describe("Comment Schemas", () => {
-    it("getCardCommentsSchema should require account_slug and card_id", () => {
+    it("getCardCommentsSchema should require account_slug and card_id or card_number", () => {
       expect(
         getCardCommentsSchema.safeParse({ account_slug: "123", card_id: "card1" }).success
       ).toBe(true);
+      expect(
+        getCardCommentsSchema.safeParse({ account_slug: "123", card_number: "42" }).success
+      ).toBe(true);
     });
 
-    it("createCommentSchema should require account_slug, card_id, and body", () => {
+    it("createCommentSchema should require account_slug, card_id or card_number, and body", () => {
       expect(
         createCommentSchema.safeParse({
           account_slug: "123",
           card_id: "card1",
+          body: "This is a comment",
+        }).success
+      ).toBe(true);
+      expect(
+        createCommentSchema.safeParse({
+          account_slug: "123",
+          card_number: "42",
           body: "This is a comment",
         }).success
       ).toBe(true);
@@ -339,4 +349,3 @@ describe("Tool Schemas", () => {
     });
   });
 });
-
