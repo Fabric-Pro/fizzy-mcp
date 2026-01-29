@@ -38,7 +38,7 @@ import {
   type LogLevel,
 } from "./utils/index.js";
 import { ALL_TOOLS } from "../tools/definitions.js";
-import { resolveCardNumber } from "../utils/card-resolver.js";
+import { executeToolHandler } from "../tools/handlers.js";
 
 /**
  * Session timeout in milliseconds (30 minutes)
@@ -425,214 +425,14 @@ export class McpSessionDO extends DurableObject<Env> {
   }
 
   /**
-   * Execute a tool call
+   * Execute a tool call using shared handlers
    */
   private async executeToolCall(
     toolName: string,
     args: Record<string, unknown>
   ): Promise<unknown> {
     if (!this.client) throw new Error("Client not initialized");
-
-    switch (toolName) {
-      // Identity
-      case "fizzy_get_identity":
-        return this.client.getIdentity();
-      case "fizzy_get_accounts":
-        return this.client.getAccounts();
-
-      // Boards
-      case "fizzy_get_boards":
-        return this.client.getBoards(args.account_slug as string);
-      case "fizzy_get_board":
-        return this.client.getBoard(args.account_slug as string, args.board_id as string);
-      case "fizzy_create_board":
-        return this.client.createBoard(args.account_slug as string, { name: args.name as string });
-      case "fizzy_update_board":
-        await this.client.updateBoard(args.account_slug as string, args.board_id as string, { name: args.name as string });
-        return `Board ${args.board_id} updated successfully`;
-      case "fizzy_delete_board":
-        await this.client.deleteBoard(args.account_slug as string, args.board_id as string);
-        return `Board ${args.board_id} deleted successfully`;
-
-      // Cards
-      case "fizzy_get_cards":
-        return this.client.getCards(args.account_slug as string, {
-          indexed_by: args.indexed_by as "all" | "closed" | "not_now" | "stalled" | "postponing_soon" | "golden" | undefined,
-          status: args.status as "draft" | "published" | "archived" | undefined,
-          column_id: args.column_id as string,
-          assignee_ids: args.assignee_ids as string[],
-          tag_ids: args.tag_ids as string[],
-          search: args.search as string,
-        });
-      case "fizzy_get_card":
-        return this.client.getCard(args.account_slug as string, args.card_id as string);
-      case "fizzy_create_card":
-        return this.client.createCard(args.account_slug as string, args.board_id as string, {
-          title: args.title as string,
-          description: args.description as string,
-          status: args.status as "draft" | "published" | undefined,
-          column_id: args.column_id as string,
-          assignee_ids: args.assignee_ids as string[],
-          tag_ids: args.tag_ids as string[],
-          due_on: args.due_on as string,
-        });
-      case "fizzy_update_card":
-        await this.client.updateCard(args.account_slug as string, args.card_id as string, {
-          title: args.title as string,
-          description: args.description as string,
-          status: args.status as "draft" | "published" | "archived" | undefined,
-          column_id: args.column_id as string,
-          assignee_ids: args.assignee_ids as string[],
-          tag_ids: args.tag_ids as string[],
-          due_on: args.due_on as string,
-        });
-        return `Card ${args.card_id} updated successfully`;
-      case "fizzy_delete_card":
-        await this.client.deleteCard(args.account_slug as string, args.card_id as string);
-        return `Card ${args.card_id} deleted successfully`;
-
-      // Comments
-      case "fizzy_get_card_comments":
-        return this.client.getCardComments(
-          args.account_slug as string,
-          await resolveCardNumber(
-            this.client,
-            args.account_slug as string,
-            args.card_id as string | undefined,
-            args.card_number as string | undefined
-          )
-        );
-      case "fizzy_create_comment":
-        return this.client.createCardComment(
-          args.account_slug as string,
-          await resolveCardNumber(
-            this.client,
-            args.account_slug as string,
-            args.card_id as string | undefined,
-            args.card_number as string | undefined
-          ),
-          { body: args.body as string }
-        );
-      case "fizzy_get_comment":
-        return this.client.getComment(args.account_slug as string, args.card_number as string, args.comment_id as string);
-      case "fizzy_update_comment":
-        await this.client.updateComment(args.account_slug as string, args.card_number as string, args.comment_id as string, { body: args.body as string });
-        return `Comment ${args.comment_id} updated`;
-      case "fizzy_delete_comment":
-        await this.client.deleteComment(args.account_slug as string, args.card_number as string, args.comment_id as string);
-        return `Comment ${args.comment_id} deleted successfully`;
-
-      // Columns
-      case "fizzy_get_columns":
-        return this.client.getColumns(args.account_slug as string, args.board_id as string);
-      case "fizzy_get_column":
-        return this.client.getColumn(args.account_slug as string, args.board_id as string, args.column_id as string);
-      case "fizzy_create_column":
-        return this.client.createColumn(args.account_slug as string, args.board_id as string, {
-          name: args.name as string,
-          color: args.color as string,
-        });
-      case "fizzy_update_column":
-        await this.client.updateColumn(args.account_slug as string, args.board_id as string, args.column_id as string, {
-          name: args.name as string,
-          color: args.color as string,
-        });
-        return `Column ${args.column_id} updated successfully`;
-      case "fizzy_delete_column":
-        await this.client.deleteColumn(args.account_slug as string, args.board_id as string, args.column_id as string);
-        return `Column ${args.column_id} deleted successfully`;
-
-      // Tags
-      case "fizzy_get_tags":
-        return this.client.getTags(args.account_slug as string);
-
-      // Users
-      case "fizzy_get_users":
-        return this.client.getUsers(args.account_slug as string);
-      case "fizzy_get_user":
-        return this.client.getUser(args.account_slug as string, args.user_id as string);
-      case "fizzy_update_user":
-        await this.client.updateUser(args.account_slug as string, args.user_id as string, { name: args.name as string });
-        return `User ${args.user_id} updated successfully`;
-      case "fizzy_deactivate_user":
-        await this.client.deactivateUser(args.account_slug as string, args.user_id as string);
-        return `User ${args.user_id} deactivated successfully`;
-
-      // Notifications
-      case "fizzy_get_notifications":
-        return this.client.getNotifications(args.account_slug as string);
-      case "fizzy_mark_notification_read":
-        await this.client.markNotificationAsRead(args.account_slug as string, args.notification_id as string);
-        return `Notification ${args.notification_id} marked as read`;
-      case "fizzy_mark_notification_unread":
-        await this.client.markNotificationAsUnread(args.account_slug as string, args.notification_id as string);
-        return `Notification ${args.notification_id} marked as unread`;
-      case "fizzy_mark_all_notifications_read":
-        await this.client.markAllNotificationsAsRead(args.account_slug as string);
-        return "All notifications marked as read";
-
-      // Card Actions
-      case "fizzy_close_card":
-        await this.client.closeCard(args.account_slug as string, args.card_number as string);
-        return `Card ${args.card_number} closed`;
-      case "fizzy_reopen_card":
-        await this.client.reopenCard(args.account_slug as string, args.card_number as string);
-        return `Card ${args.card_number} reopened`;
-      case "fizzy_move_card_to_not_now":
-        await this.client.moveCardToNotNow(args.account_slug as string, args.card_number as string);
-        return `Card ${args.card_number} moved to Not Now`;
-      case "fizzy_move_card_to_column":
-        await this.client.moveCardToColumn(args.account_slug as string, args.card_number as string, args.column_id as string);
-        return `Card ${args.card_number} moved to column ${args.column_id}`;
-      case "fizzy_send_card_to_triage":
-        await this.client.sendCardToTriage(args.account_slug as string, args.card_number as string);
-        return `Card ${args.card_number} sent to triage`;
-      case "fizzy_toggle_card_tag":
-        await this.client.toggleCardTag(args.account_slug as string, args.card_number as string, args.tag_title as string);
-        return `Tag "${args.tag_title}" toggled on card ${args.card_number}`;
-      case "fizzy_toggle_card_assignment":
-        await this.client.toggleCardAssignment(args.account_slug as string, args.card_number as string, args.assignee_id as string);
-        return `User ${args.assignee_id} assignment toggled on card ${args.card_number}`;
-      case "fizzy_watch_card":
-        await this.client.watchCard(args.account_slug as string, args.card_number as string);
-        return `Now watching card ${args.card_number}`;
-      case "fizzy_unwatch_card":
-        await this.client.unwatchCard(args.account_slug as string, args.card_number as string);
-        return `Stopped watching card ${args.card_number}`;
-      case "fizzy_gild_card":
-        await this.client.gildCard(args.account_slug as string, args.card_number as string);
-        return `Card ${args.card_number} marked as golden`;
-      case "fizzy_ungild_card":
-        await this.client.ungildCard(args.account_slug as string, args.card_number as string);
-        return `Card ${args.card_number} golden status removed`;
-
-      // Reactions
-      case "fizzy_get_reactions":
-        return this.client.getReactions(args.account_slug as string, args.card_number as string, args.comment_id as string);
-      case "fizzy_add_reaction":
-        return this.client.addReaction(args.account_slug as string, args.card_number as string, args.comment_id as string, args.content as string);
-      case "fizzy_remove_reaction":
-        await this.client.removeReaction(args.account_slug as string, args.card_number as string, args.comment_id as string, args.reaction_id as string);
-        return `Reaction ${args.reaction_id} removed`;
-
-      // Steps
-      case "fizzy_get_step":
-        return this.client.getStep(args.account_slug as string, args.card_number as string, args.step_id as string);
-      case "fizzy_create_step":
-        return this.client.createStep(args.account_slug as string, args.card_number as string, { description: args.description as string });
-      case "fizzy_update_step":
-        await this.client.updateStep(args.account_slug as string, args.card_number as string, args.step_id as string, {
-          description: args.description as string,
-          completed: args.completed as boolean,
-        });
-        return `Step ${args.step_id} updated`;
-      case "fizzy_delete_step":
-        await this.client.deleteStep(args.account_slug as string, args.card_number as string, args.step_id as string);
-        return `Step ${args.step_id} deleted`;
-
-      default:
-        throw new Error(`Unknown tool: ${toolName}`);
-    }
+    return executeToolHandler(this.client, toolName, args);
   }
 
   /**

@@ -350,7 +350,7 @@ describe("Session State", () => {
 });
 
 describe("Tool Definitions", () => {
-  // All 47 tools should be defined
+  // All 49 tools should be defined
   const toolNames = [
     "fizzy_get_identity",
     "fizzy_get_accounts",
@@ -390,6 +390,8 @@ describe("Tool Definitions", () => {
     "fizzy_toggle_card_assignment",
     "fizzy_watch_card",
     "fizzy_unwatch_card",
+    "fizzy_gild_card",
+    "fizzy_ungild_card",
     "fizzy_get_comment",
     "fizzy_update_comment",
     "fizzy_get_reactions",
@@ -402,7 +404,7 @@ describe("Tool Definitions", () => {
   ];
 
   it("should have all expected tools", () => {
-    expect(toolNames.length).toBe(47);
+    expect(toolNames.length).toBe(49);
   });
 
   it("should have identity tools", () => {
