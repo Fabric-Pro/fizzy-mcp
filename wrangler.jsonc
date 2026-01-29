@@ -77,6 +77,14 @@
     "local_protocol": "http"
   },
 
+  // Observability - persist logs to Workers dashboard
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  },
+
   // Production environment overrides
   "env": {
     "production": {
