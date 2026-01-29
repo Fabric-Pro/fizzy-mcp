@@ -457,6 +457,7 @@ export class McpSessionDO extends DurableObject<Env> {
       // Cards
       case "fizzy_get_cards":
         return this.client.getCards(args.account_slug as string, {
+          indexed_by: args.indexed_by as "all" | "closed" | "not_now" | "stalled" | "postponing_soon" | "golden" | undefined,
           status: args.status as "draft" | "published" | "archived" | undefined,
           column_id: args.column_id as string,
           assignee_ids: args.assignee_ids as string[],
@@ -598,6 +599,12 @@ export class McpSessionDO extends DurableObject<Env> {
       case "fizzy_unwatch_card":
         await this.client.unwatchCard(args.account_slug as string, args.card_number as string);
         return `Stopped watching card ${args.card_number}`;
+      case "fizzy_gild_card":
+        await this.client.gildCard(args.account_slug as string, args.card_number as string);
+        return `Card ${args.card_number} marked as golden`;
+      case "fizzy_ungild_card":
+        await this.client.ungildCard(args.account_slug as string, args.card_number as string);
+        return `Card ${args.card_number} golden status removed`;
 
       // Reactions
       case "fizzy_get_reactions":
