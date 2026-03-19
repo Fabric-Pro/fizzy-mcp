@@ -105,7 +105,7 @@ export class FizzyRateLimitError extends FizzyAPIError {
     if (retryAfterHeader) {
       // Retry-After can be seconds (integer) or HTTP-date
       const seconds = parseInt(retryAfterHeader, 10);
-      if (!isNaN(seconds)) {
+      if (!isNaN(seconds) && seconds > 0 && seconds <= 86400) {
         retryAfter = seconds;
       } else {
         // Try parsing as HTTP-date

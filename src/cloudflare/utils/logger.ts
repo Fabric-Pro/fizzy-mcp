@@ -270,13 +270,22 @@ export class CloudflareLogger {
   /**
    * Sanitize arguments to remove sensitive data
    */
-  private sanitizeArgs(args: Record<string, unknown>): Record<string, unknown> {
-    const sensitiveKeys = ["password", "token", "secret", "key", "authorization"];
+  private sanitizeArgs(args: Record<string, unknown>, depth = 0): Record<string, unknown> {
+    // Prevent infinite recursion on deeply nested or circular objects
+    if (depth > 5) return { _sanitized: "[MAX_DEPTH_EXCEEDED]" };
+
+    const sensitiveKeys = [
+      "password", "token", "secret", "key", "authorization",
+      "credential", "apikey", "api_key", "access_token", "refresh_token",
+      "private_key", "session_id", "cookie",
+    ];
     const sanitized: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(args)) {
       if (sensitiveKeys.some(k => key.toLowerCase().includes(k))) {
         sanitized[key] = "[REDACTED]";
+      } else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+        sanitized[key] = this.sanitizeArgs(value as Record<string, unknown>, depth + 1);
       } else if (typeof value === "string" && value.length > 500) {
         sanitized[key] = value.slice(0, 500) + "...[truncated]";
       } else {

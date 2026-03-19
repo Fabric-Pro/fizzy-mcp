@@ -306,6 +306,22 @@ export class FizzyClient {
         if (response.status === 201) {
           const location = response.headers?.get?.("Location");
           if (location) {
+            // Validate Location header is same-origin to prevent SSRF
+            try {
+              const locUrl = new URL(location, this.baseUrl);
+              const baseOrigin = new URL(this.baseUrl).origin;
+              if (locUrl.origin !== baseOrigin) {
+                throw new FizzyParseError(
+                  `Location header points to unexpected origin: ${locUrl.origin}`
+                );
+              }
+            } catch (e) {
+              if (e instanceof FizzyParseError) throw e;
+              // If location is a relative path, that's fine - it's same-origin
+              if (location.startsWith("http://") || location.startsWith("https://")) {
+                throw new FizzyParseError("Invalid Location header URL");
+              }
+            }
             // Extract ID from Location URL (e.g., /123/boards/abc.json -> abc)
             let id = location.split("/").pop() || "";
             // Remove .json suffix if present

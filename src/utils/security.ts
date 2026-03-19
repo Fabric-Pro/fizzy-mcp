@@ -18,6 +18,7 @@
  */
 
 import { IncomingMessage, ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { logger } from "./logger.js";
 
 const log = logger.child("security");
@@ -230,7 +231,10 @@ export async function validateRequestSecurity(
     }
     
     const token = authHeader.slice(7); // Remove "Bearer "
-    if (token !== resolved.authToken) {
+    // Use timing-safe comparison to prevent timing attacks on the auth token
+    const tokenBuf = Buffer.from(token);
+    const expectedBuf = Buffer.from(resolved.authToken);
+    if (tokenBuf.length !== expectedBuf.length || !timingSafeEqual(tokenBuf, expectedBuf)) {
       log.warn("Invalid client authentication token");
       return {
         allowed: false,
