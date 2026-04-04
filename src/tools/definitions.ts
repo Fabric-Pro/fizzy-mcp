@@ -128,10 +128,10 @@ export const TOOL_DEFINITIONS = {
       name: "fizzy_get_cards",
       title: "List Cards",
       description:
-        "Get all cards in an account with optional filtering by indexed_by (e.g., 'golden' for priority cards), " +
-        "status, column, assignees, tags, or search query. " +
-        "Returns card summaries including titles, statuses, and assignments. " +
-        "Supports pagination and filtering for large datasets.",
+        "Get all cards in an account with optional filtering by board, indexed_by (e.g., 'golden' for priority cards), " +
+        "status, column, assignees, tags, due dates, or search query. " +
+        "Use board_id to scope results to a specific board. " +
+        "Use due_before/due_after for deadline-based filtering (e.g., overdue cards, upcoming due dates).",
       schema: schemas.getCardsSchema,
       annotations: {
         readOnlyHint: true,
