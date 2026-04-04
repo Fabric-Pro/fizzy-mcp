@@ -75,14 +75,20 @@ export const toolHandlers: Record<string, ToolHandler> = {
 
   // ============ Card Tools ============
   fizzy_get_cards: async (client, args) => {
-    return client.getCards(args.account_slug as string, {
+    const filters = {
       indexed_by: args.indexed_by as "all" | "closed" | "not_now" | "stalled" | "postponing_soon" | "golden" | undefined,
       status: args.status as "draft" | "published" | "archived" | undefined,
       column_id: args.column_id as string,
       assignee_ids: args.assignee_ids as string[],
       tag_ids: args.tag_ids as string[],
+      due_before: args.due_before as string,
+      due_after: args.due_after as string,
       search: args.search as string,
-    });
+    };
+    if (args.board_id) {
+      return client.getBoardCards(args.account_slug as string, args.board_id as string, filters);
+    }
+    return client.getCards(args.account_slug as string, filters);
   },
 
   fizzy_get_card: async (client, args) => {

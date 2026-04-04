@@ -140,6 +140,11 @@ export const deleteBoardSchema = z.object({
 // Card schemas with comprehensive descriptions
 export const getCardsSchema = z.object({
   account_slug: accountSlugSchema,
+  board_id: z.string().optional().describe(
+    "Filter cards by board. Only returns cards belonging to the specified board. " +
+    "Get available board IDs from fizzy_get_boards. " +
+    "Omit to include cards from all boards."
+  ),
   indexed_by: indexedBySchema,
   status: cardStatusFilterSchema,
   column_id: z.string().optional().describe(
@@ -155,6 +160,16 @@ export const getCardsSchema = z.object({
     "Filter cards by tags. Provide an array of tag IDs. " +
     "Only returns cards that have ANY of the specified tags (OR logic). " +
     "Omit to include cards regardless of tags."
+  ),
+  due_before: z.string().optional().describe(
+    "Filter cards with due dates on or before this date (ISO 8601 format, e.g., '2026-04-10'). " +
+    "Useful for finding cards due soon or overdue. " +
+    "Omit to ignore due date upper bound."
+  ),
+  due_after: z.string().optional().describe(
+    "Filter cards with due dates on or after this date (ISO 8601 format, e.g., '2026-04-01'). " +
+    "Useful for scoping to a date range when combined with due_before. " +
+    "Omit to ignore due date lower bound."
   ),
   search: z.string().optional().describe(
     "Full-text search query to filter cards by title or description content. " +

@@ -491,6 +491,24 @@ export class FizzyClient {
   }
 
   /**
+   * Get all cards on a specific board with optional filters
+   * @endpoint GET /:account_slug/boards/:board_id/cards
+   * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#get-account_slugboardsboard_idcards
+   */
+  async getBoardCards(
+    accountSlug: string,
+    boardId: string,
+    filters?: CardFilterOptions
+  ): Promise<FizzyCard[]> {
+    const slug = this.normalizeSlug(accountSlug);
+    const queryString = filters ? this.buildQueryString(filters) : "";
+    return this.request<FizzyCard[]>(
+      "GET",
+      `/${slug}/boards/${boardId}/cards${queryString}`
+    );
+  }
+
+  /**
    * Get a specific card
    * @endpoint GET /:account_slug/cards/:card_id
    * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#get-account_slugcardscard_id
