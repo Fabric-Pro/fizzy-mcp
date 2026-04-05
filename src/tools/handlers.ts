@@ -76,6 +76,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
   // ============ Card Tools ============
   fizzy_get_cards: async (client, args) => {
     const filters = {
+      board_id: args.board_id as string,
       indexed_by: args.indexed_by as "all" | "closed" | "not_now" | "stalled" | "postponing_soon" | "golden" | undefined,
       status: args.status as "draft" | "published" | "archived" | undefined,
       column_id: args.column_id as string,
@@ -85,9 +86,6 @@ export const toolHandlers: Record<string, ToolHandler> = {
       due_after: args.due_after as string,
       search: args.search as string,
     };
-    if (args.board_id) {
-      return client.getBoardCards(args.account_slug as string, args.board_id as string, filters);
-    }
     return client.getCards(args.account_slug as string, filters);
   },
 
