@@ -96,7 +96,7 @@ export interface FizzyReaction {
 
 export interface FizzyStep {
   id: string;
-  description: string;
+  content: string;
   completed: boolean;
   completed_at?: string;
   creator: FizzyUser;
@@ -155,11 +155,11 @@ export interface CreateTagRequest {
 }
 
 export interface CreateStepRequest {
-  description: string;
+  content: string;
 }
 
 export interface UpdateStepRequest {
-  description?: string;
+  content?: string;
   completed?: boolean;
 }
 
