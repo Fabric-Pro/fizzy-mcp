@@ -280,7 +280,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
 
   fizzy_create_step: async (client, args) => {
     return client.createStep(args.account_slug as string, args.card_number as string, {
-      description: (args.content || args.description) as string,
+      content: args.content as string,
     });
   },
 
@@ -290,7 +290,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
       args.card_number as string,
       args.step_id as string,
       {
-        description: (args.content || args.description) as string,
+        content: args.content as string,
         completed: args.completed as boolean,
       }
     );

@@ -44,3 +44,4 @@ temp/
 # Cloudflare Wrangler local development files
 .dev.vars
 .wrangler/
+AGENTS.local.md
