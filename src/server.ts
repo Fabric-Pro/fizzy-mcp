@@ -16,13 +16,13 @@ import { executeToolHandler } from "./tools/handlers.js";
  * Format handler result as MCP tool response
  */
 function formatMcpResponse(result: unknown): {
-  content: Array<{ type: string; text: string }>;
+  content: Array<{ type: "text"; text: string }>;
 } {
   const text = typeof result === "string"
     ? result
     : JSON.stringify(result, null, 2);
   return {
-    content: [{ type: "text", text }],
+    content: [{ type: "text" as const, text }],
   };
 }
 
@@ -45,10 +45,11 @@ export function createFizzyServer(client: FizzyClient): McpServer {
         inputSchema: toolDef.schema,
         annotations: toolDef.annotations,
       },
-      async (args: Record<string, unknown>) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (async (args: Record<string, unknown>) => {
         const result = await executeToolHandler(client, toolDef.name, args);
         return formatMcpResponse(result);
-      }
+      }) as any
     );
   }
 
