@@ -129,9 +129,8 @@ export const TOOL_DEFINITIONS = {
       title: "List Cards",
       description:
         "Get all cards in an account with optional filtering by board, indexed_by (e.g., 'golden' for priority cards), " +
-        "status, column, assignees, tags, due dates, or search query. " +
-        "Use board_id to scope results to a specific board. " +
-        "Use due_before/due_after for deadline-based filtering (e.g., overdue cards, upcoming due dates).",
+        "column, assignees, tags, or search terms. " +
+        "Use board_id to scope results to a specific board and column_id to scope to a workflow column.",
       schema: schemas.getCardsSchema,
       annotations: {
         readOnlyHint: true,

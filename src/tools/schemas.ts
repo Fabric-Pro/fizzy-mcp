@@ -72,15 +72,6 @@ export const cardStatusSchema = z
     "'archived' = completed/closed (hidden from active view)"
   );
 
-export const cardStatusFilterSchema = z
-  .enum(["draft", "published", "archived"])
-  .optional()
-  .describe(
-    "Optional filter to limit results by card status. " +
-    "Omit to include all statuses. " +
-    "'draft' = unpublished cards, 'published' = active cards, 'archived' = closed cards"
-  );
-
 // Indexed by schema for special card filters
 export const indexedBySchema = z
   .enum(["all", "closed", "not_now", "stalled", "postponing_soon", "golden"])
@@ -91,7 +82,7 @@ export const indexedBySchema = z
     "'closed' = only closed/archived cards, " +
     "'not_now' = cards in Not Now triage, " +
     "'stalled' = cards with no recent activity, " +
-    "'postponing_soon' = cards with upcoming due dates, " +
+    "'postponing_soon' = cards nearing their board's auto-postpone period (about to move to Not Now), " +
     "'golden' = priority/important cards marked as golden"
   );
 
@@ -146,7 +137,6 @@ export const getCardsSchema = z.object({
     "Omit to include cards from all boards."
   ),
   indexed_by: indexedBySchema,
-  status: cardStatusFilterSchema,
   column_id: z.string().optional().describe(
     "Filter cards by workflow column. Only returns cards in the specified column. " +
     "Omit to include cards from all columns and triage."
@@ -161,19 +151,8 @@ export const getCardsSchema = z.object({
     "Only returns cards that have ANY of the specified tags (OR logic). " +
     "Omit to include cards regardless of tags."
   ),
-  due_before: z.string().optional().describe(
-    "Filter cards with due dates on or before this date (ISO 8601 format, e.g., '2026-04-10'). " +
-    "Useful for finding cards due soon or overdue. " +
-    "Omit to ignore due date upper bound."
-  ),
-  due_after: z.string().optional().describe(
-    "Filter cards with due dates on or after this date (ISO 8601 format, e.g., '2026-04-01'). " +
-    "Useful for scoping to a date range when combined with due_before. " +
-    "Omit to ignore due date lower bound."
-  ),
   search: z.string().optional().describe(
-    "Full-text search query to filter cards by title or description content. " +
-    "Performs fuzzy matching across card text. " +
+    "Text search to filter cards by content. Multi-word input is matched as a single search term. " +
     "Omit to return all cards (subject to other filters)."
   ),
 });

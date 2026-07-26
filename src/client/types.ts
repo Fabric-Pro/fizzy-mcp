@@ -210,16 +210,18 @@ export interface FizzyIdentity {
   accounts: FizzyAccount[];
 }
 
-// Card filtering options
-export interface CardFilterOptions {
-  [key: string]: string | string[] | undefined;
-  board_id?: string;
+// Card filtering options — GET /:account_slug/cards
+// The filter params this client currently exposes. Array-valued filters use the
+// API's plural form (Rails strong params silently drop singular keys like
+// board_id/column_id).
+// The upstream API also accepts other params (card_ids, creator_ids, closer_ids,
+// assignment_status, sorted_by, creation, closure) not yet exposed here.
+// See https://github.com/basecamp/fizzy/blob/main/docs/api/sections/cards.md
+export type CardFilterOptions = {
+  board_ids?: string[];
+  column_ids?: string[];
+  terms?: string[];
   indexed_by?: "all" | "closed" | "not_now" | "stalled" | "postponing_soon" | "golden";
-  status?: "draft" | "published" | "archived";
-  column_id?: string;
   assignee_ids?: string[];
   tag_ids?: string[];
-  due_before?: string;
-  due_after?: string;
-  search?: string;
-}
+};

@@ -9,7 +9,7 @@
  */
 
 import type { FizzyClient } from "../client/fizzy-client.js";
-import { COLUMN_COLORS, type ColumnColor } from "../client/types.js";
+import { COLUMN_COLORS, type ColumnColor, type CardFilterOptions } from "../client/types.js";
 import { resolveCardNumber } from "../utils/card-resolver.js";
 
 /**
@@ -75,16 +75,28 @@ export const toolHandlers: Record<string, ToolHandler> = {
 
   // ============ Card Tools ============
   fizzy_get_cards: async (client, args) => {
-    const filters = {
-      board_id: args.board_id as string,
-      indexed_by: args.indexed_by as "all" | "closed" | "not_now" | "stalled" | "postponing_soon" | "golden" | undefined,
-      status: args.status as "draft" | "published" | "archived" | undefined,
-      column_id: args.column_id as string,
-      assignee_ids: args.assignee_ids as string[],
-      tag_ids: args.tag_ids as string[],
-      due_before: args.due_before as string,
-      due_after: args.due_after as string,
-      search: args.search as string,
+    // The Cloudflare transport executes raw args without zod validation, so stale
+    // clients sending these removed fields must get a visible error here rather
+    // than a silently unfiltered payload. The stdio/Node MCP SDK path strips
+    // unknown keys before the handler runs, so this only fires there if a
+    // pre-validation bug ever reintroduces one of these fields.
+    const unsupported = ["status", "due_before", "due_after"].filter(
+      (key) => args[key] !== undefined
+    );
+    if (unsupported.length > 0) {
+      throw new Error(
+        `Unsupported filter(s): ${unsupported.join(", ")}. ` +
+        `The Fizzy cards API cannot filter by status or due date. ` +
+        `Card listings always contain published cards; use indexed_by="closed" for closed cards.`
+      );
+    }
+    const filters: CardFilterOptions = {
+      board_ids: args.board_id ? [args.board_id as string] : undefined,
+      column_ids: args.column_id ? [args.column_id as string] : undefined,
+      terms: args.search ? [args.search as string] : undefined,
+      indexed_by: args.indexed_by as CardFilterOptions["indexed_by"],
+      assignee_ids: args.assignee_ids as string[] | undefined,
+      tag_ids: args.tag_ids as string[] | undefined,
     };
     return client.getCards(args.account_slug as string, filters);
   },
