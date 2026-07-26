@@ -45,3 +45,7 @@ temp/
 .dev.vars
 .wrangler/
 AGENTS.local.md
+
+# Agent configs (local permission allowlists — never commit)
+.fabric/settings.json
+.fabric/settings.local.json
