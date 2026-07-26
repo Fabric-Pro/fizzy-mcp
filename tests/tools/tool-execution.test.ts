@@ -40,6 +40,7 @@ import {
   FizzyAuthError,
   FizzyValidationError,
 } from "../../src/utils/errors.js";
+import { toolHandlers } from "../../src/tools/handlers.js";
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -208,22 +209,22 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
       mockFetch.mockResolvedValueOnce(mockResponse(mockCards));
 
       const result = await client.getCards("123", {
-        status: "published",
-        column_id: "col1",
-        search: "test",
+        board_ids: ["board1"],
+        column_ids: ["col1"],
+        terms: ["test"],
       });
 
       expect(result).toEqual(mockCards);
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("status=published"),
+        expect.stringContaining("board_ids%5B%5D=board1"),
         expect.any(Object)
       );
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("column_id=col1"),
+        expect.stringContaining("column_ids%5B%5D=col1"),
         expect.any(Object)
       );
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("search=test"),
+        expect.stringContaining("terms%5B%5D=test"),
         expect.any(Object)
       );
     });
@@ -578,15 +579,78 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
       mockFetch.mockResolvedValueOnce(mockResponse([]));
 
       await client.getCards("123", {
-        status: "published",
-        column_id: undefined,
-        search: undefined,
+        indexed_by: "closed",
+        column_ids: undefined,
+        terms: undefined,
       });
 
       const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("status=published");
-      expect(url).not.toContain("column_id");
-      expect(url).not.toContain("search");
+      expect(url).toContain("indexed_by=closed");
+      expect(url).not.toContain("column_ids");
+      expect(url).not.toContain("terms");
+    });
+  });
+
+  describe("fizzy_get_cards handler (maps external filter names to API params)", () => {
+    it("maps board_id/column_id/search to plural array params and passes through the rest", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue([]) };
+
+      await toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+        board_id: "b1",
+        column_id: "c1",
+        search: "urgent task",
+        indexed_by: "golden",
+        assignee_ids: ["u1"],
+        tag_ids: ["t1"],
+      });
+
+      expect(mockClient.getCards).toHaveBeenCalledWith("123", {
+        board_ids: ["b1"],
+        column_ids: ["c1"],
+        terms: ["urgent task"],
+        indexed_by: "golden",
+        assignee_ids: ["u1"],
+        tag_ids: ["t1"],
+      });
+    });
+
+    it("leaves board_ids/column_ids/terms undefined when no filters are given", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue([]) };
+
+      await toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+      });
+
+      const filters = mockClient.getCards.mock.calls[0][1];
+      expect(filters.board_ids).toBeUndefined();
+      expect(filters.column_ids).toBeUndefined();
+      expect(filters.terms).toBeUndefined();
+    });
+
+    it("rejects a status filter with an 'Unsupported filter' error", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue([]) };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          status: "draft",
+        })
+      ).rejects.toThrow(/Unsupported filter/);
+      expect(mockClient.getCards).not.toHaveBeenCalled();
+    });
+
+    it("rejects due_before/due_after filters with an 'Unsupported filter' error", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue([]) };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          due_before: "2026-04-10",
+          due_after: "2026-04-01",
+        })
+      ).rejects.toThrow(/Unsupported filter/);
+      expect(mockClient.getCards).not.toHaveBeenCalled();
     });
   });
 });

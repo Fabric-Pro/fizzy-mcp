@@ -18,7 +18,7 @@
  *   DELETE /:account_slug/boards/:board_id        - Delete board
  * 
  * CARDS
- *   GET    /:account_slug/cards                   - List cards (supports ?status, ?column_id, ?assignee_ids[], ?tag_ids[] filters)
+ *   GET    /:account_slug/cards                   - List cards (supports ?board_ids[], ?column_ids[], ?terms[], ?assignee_ids[], ?tag_ids[] filters)
  *   GET    /:account_slug/boards/:board_id/cards  - List cards on a specific board
  *   GET    /:account_slug/cards/:card_id          - Get specific card
  *   POST   /:account_slug/boards/:board_id/cards  - Create card on board
@@ -394,7 +394,7 @@ describe("FizzyClient", () => {
 
   /**
    * Cards API
-   * GET  /:account_slug/cards                     - List cards (with optional ?status, ?column_id, ?assignee_ids[], ?tag_ids[] filters)
+   * GET  /:account_slug/cards                     - List cards (with optional ?board_ids[], ?column_ids[], ?terms[], ?assignee_ids[], ?tag_ids[] filters)
    * GET  /:account_slug/boards/:board_id/cards    - List cards on a specific board
    * GET  /:account_slug/cards/:card_id            - Get specific card
    * POST /:account_slug/boards/:board_id/cards    - Create card on board (NOTE: uses boards path!)
@@ -402,7 +402,9 @@ describe("FizzyClient", () => {
    * DELETE /:account_slug/cards/:card_id          - Delete card
    */
   describe("Cards", () => {
-    // Expected URL: GET /:account_slug/cards?status=...&column_id=...
+    // Expected URL: GET /:account_slug/cards?board_ids[]=...&column_ids[]=...&terms[]=...
+    // The Fizzy API only accepts these plural array params (Rails strong params drop
+    // singular keys like status/column_id/search).
     it("should get all cards with filters", async () => {
       const mockCards = [{ id: "card1", title: "Card 1" }];
 
@@ -413,8 +415,9 @@ describe("FizzyClient", () => {
       });
 
       const result = await client.getCards("123", {
-        status: "published",
-        column_id: "col1",
+        board_ids: ["board1"],
+        column_ids: ["col1"],
+        terms: ["urgent task"],
       });
 
       expect(mockFetch).toHaveBeenCalledWith(
@@ -422,7 +425,15 @@ describe("FizzyClient", () => {
         expect.any(Object)
       );
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("status=published"),
+        expect.stringContaining("board_ids%5B%5D=board1"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("column_ids%5B%5D=col1"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("terms%5B%5D=urgent+task"),
         expect.any(Object)
       );
       expect(result).toEqual(mockCards);

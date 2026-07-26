@@ -93,27 +93,12 @@ describe("Tool Schemas", () => {
       expect(
         getCardsSchema.safeParse({
           account_slug: "123",
-          status: "published",
+          board_id: "board1",
           column_id: "col1",
           assignee_ids: ["user1"],
           tag_ids: ["tag1"],
           search: "test",
         }).success
-      ).toBe(true);
-    });
-
-    it("getCardsSchema should validate status enum", () => {
-      expect(
-        getCardsSchema.safeParse({ account_slug: "123", status: "invalid" }).success
-      ).toBe(false);
-      expect(
-        getCardsSchema.safeParse({ account_slug: "123", status: "draft" }).success
-      ).toBe(true);
-      expect(
-        getCardsSchema.safeParse({ account_slug: "123", status: "published" }).success
-      ).toBe(true);
-      expect(
-        getCardsSchema.safeParse({ account_slug: "123", status: "archived" }).success
       ).toBe(true);
     });
 
