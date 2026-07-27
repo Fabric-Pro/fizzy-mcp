@@ -113,6 +113,11 @@ describe("Tool Schemas", () => {
       expect(getCardsSchema.safeParse({ account_slug: "123", page: "2" }).success).toBe(false);
     });
 
+    it("getCardsSchema should reject a page beyond MAX_SAFE_INTEGER", () => {
+      // Number.isInteger(1e100) is true, so this only fails once .max() is checked.
+      expect(getCardsSchema.safeParse({ account_slug: "123", page: 1e100 }).success).toBe(false);
+    });
+
     it("getCardSchema should require account_slug and card_id", () => {
       expect(
         getCardSchema.safeParse({ account_slug: "123", card_id: "card1" }).success

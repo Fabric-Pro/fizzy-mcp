@@ -667,6 +667,30 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
       expect(mockClient.getCards).not.toHaveBeenCalled();
     });
 
+    it("rejects a page number too large to be a safe integer", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          page: 1e100,
+        })
+      ).rejects.toThrow("page must be a positive integer (1-based), e.g. 2");
+      expect(mockClient.getCards).not.toHaveBeenCalled();
+    });
+
+    it("rejects an oversized digit-string page", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          page: "9".repeat(400),
+        })
+      ).rejects.toThrow("page must be a positive integer (1-based), e.g. 2");
+      expect(mockClient.getCards).not.toHaveBeenCalled();
+    });
+
     it("returns the page envelope from the client unchanged", async () => {
       const envelope = {
         cards: [{ id: "card1" }],

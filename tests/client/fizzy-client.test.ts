@@ -653,6 +653,98 @@ describe("FizzyClient", () => {
       expect(result.total_count).toBeNull();
     });
 
+    it("reports total_count null for a header with trailing junk", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({ "X-Total-Count": "12junk" }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.total_count).toBeNull();
+    });
+
+    it("reports total_count null for a negative header value", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({ "X-Total-Count": "-5" }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.total_count).toBeNull();
+    });
+
+    it("does not treat rel=\"xrel\" as a next link (false positive guard)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://app.fizzy.do/123/cards?page=2>; xrel="next"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+      expect(result.next_page).toBeNull();
+    });
+
+    it("does not treat rel=\"next-page\" as a next link (false positive guard)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://app.fizzy.do/123/cards?page=2>; rel="next-page"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+      expect(result.next_page).toBeNull();
+    });
+
+    it("treats a quoted rel token list containing next as a next link", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://app.fizzy.do/123/cards?page=2>; rel="prev next"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(true);
+      expect(result.next_page).toBe(2);
+    });
+
+    it("finds rel=next among multiple links in the same header", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link:
+            '<https://app.fizzy.do/123/cards?page=1>; rel="prev", ' +
+            '<https://app.fizzy.do/123/cards?page=3>; rel="next"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123", { page: 2 });
+
+      expect(result.has_more).toBe(true);
+      expect(result.next_page).toBe(3);
+    });
+
     it("returns an empty cards array when the requested page is past the end", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -750,12 +842,16 @@ describe("FizzyClient", () => {
         retryBaseDelay: 10,
       });
       const mockCards = [{ id: "card1", title: "Card 1" }];
+      const failedHeadersGet = vi.fn(() => {
+        throw new Error("must not read headers of a failed response");
+      });
 
       mockFetch
         .mockResolvedValueOnce({
           ok: false,
           status: 500,
           statusText: "Internal Server Error",
+          headers: { get: failedHeadersGet },
           text: async () => "Error",
         })
         .mockResolvedValueOnce({
@@ -771,6 +867,7 @@ describe("FizzyClient", () => {
       const result = await clientWithRetry.getCards("123");
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(failedHeadersGet).not.toHaveBeenCalled();
       expect(result).toEqual({
         cards: mockCards,
         page: 1,

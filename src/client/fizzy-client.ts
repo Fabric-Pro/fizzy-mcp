@@ -438,15 +438,36 @@ export class FizzyClient {
       return undefined;
     }
 
-    const parsedTotal = totalCountHeader === null ? NaN : parseInt(totalCountHeader, 10);
-    const totalCount = Number.isFinite(parsedTotal) ? parsedTotal : null;
+    const trimmedTotal = totalCountHeader === null ? null : totalCountHeader.trim();
+    const totalCount =
+      trimmedTotal !== null && /^[0-9]+$/.test(trimmedTotal) && Number.isSafeInteger(Number(trimmedTotal))
+        ? Number(trimmedTotal)
+        : null;
 
-    // Upstream emits rel="next" on every page but the last. Test the whole header
-    // so multi-link values need no splitting, and allow an unquoted rel (RFC 8288).
-    const hasMore =
-      linkHeader !== null && /<[^>]*>\s*;[^,]*?rel\s*=\s*"?next"?/i.test(linkHeader);
+    // Upstream emits rel="next" on every page but the last.
+    const hasMore = linkHeader !== null && this.linkHeaderHasNextRel(linkHeader);
 
     return { totalCount, hasMore };
+  }
+
+  /**
+   * True when an RFC 8288 Link header contains a link with relation type "next".
+   * A comma only separates link-values when followed by a new <URL>, so commas
+   * inside quoted params don't split; rel values may be quoted token lists.
+   */
+  private linkHeaderHasNextRel(linkHeader: string): boolean {
+    for (const part of linkHeader.split(/,(?=\s*<)/)) {
+      const paramsStart = part.indexOf(">");
+      if (paramsStart === -1) continue;
+      for (const param of part.slice(paramsStart + 1).split(";")) {
+        const eq = param.indexOf("=");
+        if (eq === -1) continue;
+        if (param.slice(0, eq).trim().toLowerCase() !== "rel") continue;
+        const value = param.slice(eq + 1).trim().replace(/^"(.*)"$/, "$1");
+        if (value.toLowerCase().split(/\s+/).includes("next")) return true;
+      }
+    }
+    return false;
   }
 
   // ============ Identity ============
@@ -554,6 +575,11 @@ export class FizzyClient {
     const slug = this.normalizeSlug(accountSlug);
     const queryString = options ? this.buildQueryString(options) : "";
     const requestedPage = options?.page ?? 1;
+
+    // The tool layer validates `page` separately; this defends direct client callers.
+    if (!Number.isSafeInteger(requestedPage) || requestedPage < 1) {
+      throw new Error("page must be a positive integer (1-based)");
+    }
 
     const { data, meta } = await this.requestWithMeta<FizzyCard[]>(
       "GET",

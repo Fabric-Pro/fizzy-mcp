@@ -43,12 +43,12 @@ function getColumnColorValue(color?: string): string | undefined {
  */
 function parseCardsPage(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value === "number" && Number.isInteger(value) && value >= 1) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 1) {
     return value;
   }
   if (typeof value === "string" && /^[0-9]+$/.test(value)) {
     const parsed = parseInt(value, 10);
-    if (parsed >= 1) return parsed;
+    if (Number.isSafeInteger(parsed) && parsed >= 1) return parsed;
   }
   throw new Error("page must be a positive integer (1-based), e.g. 2");
 }
