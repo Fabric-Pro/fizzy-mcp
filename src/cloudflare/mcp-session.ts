@@ -304,7 +304,7 @@ export class McpSessionDO extends DurableObject<Env> {
       const jsonSchema = zodToJsonSchema(toolDef.schema, {
         target: "jsonSchema2019-09",
         $refStrategy: "none",
-      });
+      }) as Record<string, unknown>;
 
       // Remove $schema field (MCP defaults to 2020-12)
       if ("$schema" in jsonSchema) {
@@ -320,7 +320,7 @@ export class McpSessionDO extends DurableObject<Env> {
         name: toolDef.name,
         title: toolDef.title,
         description: toolDef.description,
-        inputSchema: jsonSchema as Record<string, unknown>,
+        inputSchema: jsonSchema,
         annotations: toolDef.annotations,
       };
     });

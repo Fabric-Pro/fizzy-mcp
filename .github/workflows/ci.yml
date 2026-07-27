@@ -36,13 +36,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Typecheck (Cloudflare)
+        run: npm run typecheck:cf
+
       - name: Build
         run: npm run build
 
-      # NOTE: Cloudflare-targeted checks (`npm run typecheck:cf`,
-      # `npm run test:cloudflare`) are intentionally excluded here. main
-      # currently fails `tsc --noEmit -p tsconfig.cloudflare.json` with
-      # pre-existing type errors at src/cloudflare/mcp-session.ts:315-316.
-      # Re-enable once those are fixed.
       - name: Test
         run: npm test
+
+      - name: Test (Cloudflare)
+        run: npm run test:cloudflare
