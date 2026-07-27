@@ -15,7 +15,6 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import { FizzyClient } from "../client/fizzy-client.js";
 import type {
   Env,
@@ -37,7 +36,10 @@ import {
   type CloudflareAnalytics,
   type LogLevel,
 } from "./utils/index.js";
-import { ALL_TOOLS } from "../tools/definitions.js";
+import {
+  buildMcpToolDefinitions,
+  type McpToolDefinition,
+} from "../tools/json-schema.js";
 import { executeToolHandler } from "../tools/handlers.js";
 
 /**
@@ -285,45 +287,12 @@ export class McpSessionDO extends DurableObject<Env> {
 
   /**
    * Get tool definitions
-   * 
+   *
    * Uses centralized tool definitions from tools/definitions.ts and converts
    * Zod schemas to JSON Schema for MCP protocol compatibility.
    */
-  private getToolDefinitions(): Array<{
-    name: string;
-    title?: string;
-    description: string;
-    inputSchema: Record<string, unknown>;
-    annotations?: {
-      readOnlyHint?: boolean;
-      destructiveHint?: boolean;
-    };
-  }> {
-    return ALL_TOOLS.map((toolDef) => {
-      // Convert Zod schema to JSON Schema
-      const jsonSchema = zodToJsonSchema(toolDef.schema, {
-        target: "jsonSchema2019-09",
-        $refStrategy: "none",
-      }) as Record<string, unknown>;
-
-      // Remove $schema field (MCP defaults to 2020-12)
-      if ("$schema" in jsonSchema) {
-        delete jsonSchema.$schema;
-      }
-
-      // Add strict mode (additionalProperties: false)
-      if (jsonSchema.type === "object") {
-        jsonSchema.additionalProperties = false;
-      }
-
-      return {
-        name: toolDef.name,
-        title: toolDef.title,
-        description: toolDef.description,
-        inputSchema: jsonSchema,
-        annotations: toolDef.annotations,
-      };
-    });
+  private getToolDefinitions(): McpToolDefinition[] {
+    return buildMcpToolDefinitions();
   }
 
   /**
