@@ -45,7 +45,6 @@ export function createFizzyServer(client: FizzyClient): McpServer {
         inputSchema: toolDef.schema,
         annotations: toolDef.annotations,
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (async (args: Record<string, unknown>) => {
         const result = await executeToolHandler(client, toolDef.name, args);
         return formatMcpResponse(result);
