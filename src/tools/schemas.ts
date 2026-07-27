@@ -155,7 +155,11 @@ export const getCardsSchema = z.object({
     "Text search to filter cards by content. Multi-word input is matched as a single search term. " +
     "Omit to return all cards (subject to other filters)."
   ),
-  page: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional().describe(
+  // Use .min(1) rather than .positive(): both mean "page >= 1" for an integer, but
+  // .positive() is an *exclusive* bound, which zod-to-json-schema renders as the
+  // draft-04 `exclusiveMinimum: true` flag. Draft 2020-12 requires a numeric bound,
+  // so the exclusive form makes the whole tool list unusable for strict clients.
+  page: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional().describe(
     "Page number to fetch (1-based). Card listings are paginated with a server-controlled, variable page size " +
     "(early pages are small, e.g. 15 cards; later pages are larger). Omit for the first page; " +
     "pass the next_page value from the previous response to fetch subsequent pages."
