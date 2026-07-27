@@ -16,6 +16,11 @@ export interface CacheEntry<T> {
   data: T;
   cachedAt: number;
   url: string;
+  /**
+   * Opaque, endpoint-specific metadata captured alongside the body (e.g. the
+   * pagination headers of a list response) so a later 304 can still report it.
+   */
+  meta?: unknown;
 }
 
 export interface ETagCacheOptions {
@@ -65,9 +70,25 @@ export class ETagCache<T = unknown> {
   }
 
   /**
-   * Store response data with its ETag
+   * Get cached data together with its stored metadata, if available and not expired
    */
-  set(url: string, etag: string, data: T): void {
+  getEntry(url: string): { data: T; meta: unknown } | undefined {
+    const entry = this.cache.get(url);
+    if (entry && !this.isExpired(entry)) {
+      this.log.debug(`Cache hit: ${url}`);
+      return { data: entry.data, meta: entry.meta };
+    }
+    if (entry) {
+      // Expired, remove it
+      this.cache.delete(url);
+    }
+    return undefined;
+  }
+
+  /**
+   * Store response data with its ETag, plus optional endpoint-specific metadata
+   */
+  set(url: string, etag: string, data: T, meta?: unknown): void {
     // Enforce max entries (LRU-style: remove oldest if at limit)
     if (this.cache.size >= this.maxEntries) {
       const oldestKey = this.cache.keys().next().value;
@@ -82,6 +103,7 @@ export class ETagCache<T = unknown> {
       data,
       cachedAt: Date.now(),
       url,
+      meta,
     });
 
     this.log.debug(`Cache stored: ${url}`, { etag });

@@ -198,12 +198,6 @@ export const COLUMN_COLORS = {
 
 export type ColumnColor = keyof typeof COLUMN_COLORS;
 
-// API Response types
-export interface PaginatedResponse<T> {
-  data: T[];
-  nextPageUrl?: string;
-}
-
 // Identity - Response from GET /my/identity
 // Note: User info is embedded in accounts[].user, not at the top level
 export interface FizzyIdentity {
@@ -225,3 +219,17 @@ export type CardFilterOptions = {
   assignee_ids?: string[];
   tag_ids?: string[];
 };
+
+// Options accepted by getCards: the filters above plus `page`, which is a
+// pagination param (1-based), not a filter.
+export type CardListOptions = CardFilterOptions & { page?: number };
+
+// One page of GET /:account_slug/cards. The endpoint is paginated upstream
+// (geared_pagination in offset mode) with a server-controlled, variable page size.
+export interface CardsPage {
+  cards: FizzyCard[];
+  page: number;               // the page that was fetched (1-based)
+  total_count: number | null; // X-Total-Count: total cards matching the filters (advisory; null if header absent)
+  has_more: boolean;          // Link header contained rel="next"
+  next_page: number | null;   // page + 1 when has_more, else null
+}

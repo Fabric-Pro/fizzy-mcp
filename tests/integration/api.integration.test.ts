@@ -91,14 +91,19 @@ describe.skipIf(!shouldRun)("Fizzy API Integration Tests", () => {
     });
 
     it("GET /:account_slug/cards - discovers existing cards", async () => {
-      const cards = await client!.getCards(testData.accountSlug);
+      const page = await client!.getCards(testData.accountSlug);
 
-      expect(cards).toBeDefined();
+      expect(page).toBeDefined();
+      expect(Array.isArray(page.cards)).toBe(true);
 
-      if (cards.length > 0) {
-        const card = cards[0] as { number: number };
+      if (page.cards.length > 0) {
+        const card = page.cards[0] as { number: number };
         testData.existingCardNumber = card.number.toString();
-        console.log(`✓ Setup: Found ${cards.length} cards, using #${testData.existingCardNumber}`);
+        console.log(
+          `✓ Setup: Found ${page.cards.length} cards on page ${page.page} ` +
+          `(total_count ${page.total_count}, has_more ${page.has_more}), ` +
+          `using #${testData.existingCardNumber}`
+        );
       } else {
         console.log("✓ Setup: No existing cards found");
       }

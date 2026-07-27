@@ -163,7 +163,7 @@ export interface HealthResponse {
  */
 export const MCP_PROTOCOL_VERSION = "2024-11-05";
 export const SERVER_NAME = "fizzy-mcp";
-export const SERVER_VERSION = "1.0.0";
+export const SERVER_VERSION = "1.1.0";
 
 /**
  * Re-export Cloudflare types for convenience

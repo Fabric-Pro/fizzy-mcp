@@ -9,7 +9,7 @@
  */
 
 import type { FizzyClient } from "../client/fizzy-client.js";
-import { COLUMN_COLORS, type ColumnColor, type CardFilterOptions } from "../client/types.js";
+import { COLUMN_COLORS, type ColumnColor, type CardListOptions } from "../client/types.js";
 import { resolveCardNumber } from "../utils/card-resolver.js";
 
 /**
@@ -31,6 +31,26 @@ export type ToolHandler = (
 function getColumnColorValue(color?: string): string | undefined {
   if (!color) return undefined;
   return COLUMN_COLORS[color as ColumnColor];
+}
+
+/**
+ * Validate the optional 1-based `page` argument of fizzy_get_cards.
+ *
+ * Like the unsupported-filter guard below, this has to run here because the
+ * Cloudflare transport executes raw args without zod. Digit strings are accepted
+ * because LLM clients routinely send "2"; the stdio path rejects those upstream,
+ * and being lenient here costs nothing.
+ */
+function parseCardsPage(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1) {
+    return value;
+  }
+  if (typeof value === "string" && /^[0-9]+$/.test(value)) {
+    const parsed = parseInt(value, 10);
+    if (parsed >= 1) return parsed;
+  }
+  throw new Error("page must be a positive integer (1-based), e.g. 2");
 }
 
 /**
@@ -90,15 +110,16 @@ export const toolHandlers: Record<string, ToolHandler> = {
         `Card listings always contain published cards; use indexed_by="closed" for closed cards.`
       );
     }
-    const filters: CardFilterOptions = {
+    const options: CardListOptions = {
       board_ids: args.board_id ? [args.board_id as string] : undefined,
       column_ids: args.column_id ? [args.column_id as string] : undefined,
       terms: args.search ? [args.search as string] : undefined,
-      indexed_by: args.indexed_by as CardFilterOptions["indexed_by"],
+      indexed_by: args.indexed_by as CardListOptions["indexed_by"],
       assignee_ids: args.assignee_ids as string[] | undefined,
       tag_ids: args.tag_ids as string[] | undefined,
+      page: parseCardsPage(args.page),
     };
-    return client.getCards(args.account_slug as string, filters);
+    return client.getCards(args.account_slug as string, options);
   },
 
   fizzy_get_card: async (client, args) => {

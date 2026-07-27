@@ -32,7 +32,7 @@ function formatMcpResponse(result: unknown): {
 export function createFizzyServer(client: FizzyClient): McpServer {
   const server = new McpServer({
     name: "fizzy-mcp",
-    version: "1.0.0",
+    version: "1.1.0",
   });
 
   // Register all tools using shared handlers

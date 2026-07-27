@@ -128,9 +128,16 @@ export const TOOL_DEFINITIONS = {
       name: "fizzy_get_cards",
       title: "List Cards",
       description:
-        "Get all cards in an account with optional filtering by board, indexed_by (e.g., 'golden' for priority cards), " +
+        "Get a page of cards in an account with optional filtering by board, indexed_by (e.g., 'golden' for priority cards), " +
         "column, assignees, tags, or search terms. " +
-        "Use board_id to scope results to a specific board and column_id to scope to a workflow column.",
+        "Use board_id to scope results to a specific board and column_id to scope to a workflow column. " +
+        "Results are PAGINATED with a server-controlled, variable page size, so never compute a page count " +
+        "from the length of one page. " +
+        "Returns an object {cards, page, total_count, has_more, next_page}, where total_count is the total number " +
+        "of cards matching the filters (NOT the length of this page). " +
+        "To enumerate every match, call repeatedly with page = next_page until has_more is false OR cards comes back " +
+        "empty — an out-of-range page returns empty cards but may still report has_more true. " +
+        "A board's cards_count from fizzy_get_boards can exceed a single page of results; that is expected, not a discrepancy.",
       schema: schemas.getCardsSchema,
       annotations: {
         readOnlyHint: true,
