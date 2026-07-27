@@ -1,0 +1,8 @@
+# Blast-radius paths: changes here trigger an automatic review request.
+# Note: with current rulesets this is a review-request mechanism, not an enforcement gate.
+/package.json @rajavemuri
+/package-lock.json @rajavemuri
+/wrangler.jsonc @rajavemuri
+/tsconfig*.json @rajavemuri
+/.fabric/ @rajavemuri
+/.github/ @rajavemuri
