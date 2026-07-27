@@ -451,20 +451,66 @@ export class FizzyClient {
   }
 
   /**
+   * Split on a separator that only counts at top level — i.e. outside RFC 8288
+   * quoted-strings (which may contain the separator, with \-escapes) and outside
+   * <URL> brackets.
+   */
+  private static splitTopLevel(input: string, separator: string): string[] {
+    const parts: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    let inAngle = false;
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i];
+      if (inQuotes) {
+        if (ch === "\\" && i + 1 < input.length) {
+          current += ch + input[i + 1];
+          i++;
+          continue;
+        }
+        if (ch === '"') inQuotes = false;
+        current += ch;
+      } else if (ch === '"') {
+        inQuotes = true;
+        current += ch;
+      } else if (ch === "<" && !inAngle) {
+        inAngle = true;
+        current += ch;
+      } else if (ch === ">" && inAngle) {
+        inAngle = false;
+        current += ch;
+      } else if (ch === separator && !inAngle) {
+        parts.push(current);
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    parts.push(current);
+    return parts;
+  }
+
+  /**
    * True when an RFC 8288 Link header contains a link with relation type "next".
-   * A comma only separates link-values when followed by a new <URL>, so commas
-   * inside quoted params don't split; rel values may be quoted token lists.
+   * Quoted strings never split link-values or params, and per RFC 8288 only the
+   * FIRST rel param of a link-value counts.
    */
   private linkHeaderHasNextRel(linkHeader: string): boolean {
-    for (const part of linkHeader.split(/,(?=\s*<)/)) {
-      const paramsStart = part.indexOf(">");
-      if (paramsStart === -1) continue;
-      for (const param of part.slice(paramsStart + 1).split(";")) {
+    for (const linkValue of FizzyClient.splitTopLevel(linkHeader, ",")) {
+      const urlEnd = linkValue.indexOf(">");
+      if (!linkValue.trimStart().startsWith("<") || urlEnd === -1) continue;
+      for (const param of FizzyClient.splitTopLevel(linkValue.slice(urlEnd + 1), ";")) {
         const eq = param.indexOf("=");
         if (eq === -1) continue;
         if (param.slice(0, eq).trim().toLowerCase() !== "rel") continue;
-        const value = param.slice(eq + 1).trim().replace(/^"(.*)"$/, "$1");
-        if (value.toLowerCase().split(/\s+/).includes("next")) return true;
+        // First rel wins (RFC 8288 §3.3); later rel params must be ignored.
+        let value = param.slice(eq + 1).trim();
+        if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+          value = value.slice(1, -1).replace(/\\(.)/g, "$1");
+        }
+        const isNext = value.toLowerCase().split(/\s+/).includes("next");
+        if (isNext) return true;
+        break;
       }
     }
     return false;

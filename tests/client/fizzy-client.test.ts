@@ -745,6 +745,81 @@ describe("FizzyClient", () => {
       expect(result.next_page).toBe(3);
     });
 
+    it("does not let a quoted title fabricate a rel=next param (false positive guard)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://example/cards>; title="literal; rel=next; suffix"; rel="prev"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+    });
+
+    it("does not let a quoted comma fabricate a link-value (false positive guard)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://x/a>; title="see also, <https://x/b>; rel=next"; rel="prev"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+    });
+
+    it("finds a real rel=next after a quoted param containing a semicolon", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://x/a>; title="x; y"; rel="next"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(true);
+    });
+
+    it("honors only the first rel param on a link-value (RFC 8288)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://x/a>; rel="prev"; rel="next"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+    });
+
+    it("does not let an escaped quote inside a quoted string fabricate rel=next", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://x/a>; title="say \\" ; rel=next"; rel="prev"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+    });
+
     it("returns an empty cards array when the requested page is past the end", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
