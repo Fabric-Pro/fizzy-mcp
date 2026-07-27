@@ -26,7 +26,8 @@ import type {
   UpdateUserRequest,
   CreateStepRequest,
   UpdateStepRequest,
-  CardFilterOptions,
+  CardListOptions,
+  CardsPage,
 } from "./types.js";
 import {
   createAPIError,
@@ -165,6 +166,20 @@ export class FizzyClient {
     path: string,
     body?: unknown
   ): Promise<T> {
+    const { data } = await this.requestWithMeta<T>(method, path, body);
+    return data;
+  }
+
+  /**
+   * Same as `request`, but also returns metadata derived from the response by
+   * `extractMeta` (e.g. pagination headers). Shares the retry/backoff loop.
+   */
+  private async requestWithMeta<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    extractMeta?: (response: Response) => unknown
+  ): Promise<{ data: T; meta: unknown }> {
     const url = `${this.baseUrl}${path}`;
     const requestId = this.generateRequestId();
     let lastError: Error | undefined;
@@ -173,7 +188,13 @@ export class FizzyClient {
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
-        const result = await this.executeRequest<T>(method, url, body, requestId);
+        const result = await this.executeRequestWithMeta<T>(
+          method,
+          url,
+          body,
+          requestId,
+          extractMeta
+        );
         this.log.debug(`[${requestId}] Request completed successfully`);
         return result;
       } catch (error) {
@@ -213,14 +234,20 @@ export class FizzyClient {
   }
 
   /**
-   * Execute a single HTTP request with timeout and ETag caching
+   * Execute a single HTTP request with timeout and ETag caching.
+   *
+   * `extractMeta` runs on exactly two paths: a fresh response whose JSON body
+   * parsed successfully, and a 304. It never runs on 204, on the 201-Location
+   * fallback, or on any error path (those throw first) — which is what keeps it
+   * away from the error bodies of attempts that are about to be retried.
    */
-  private async executeRequest<T>(
+  private async executeRequestWithMeta<T>(
     method: string,
     url: string,
     body?: unknown,
-    requestId?: string
-  ): Promise<T> {
+    requestId?: string,
+    extractMeta?: (response: Response) => unknown
+  ): Promise<{ data: T; meta: unknown }> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.accessToken}`,
       Accept: "application/json",
@@ -267,10 +294,16 @@ export class FizzyClient {
 
       // Handle 304 Not Modified - return cached data
       if (response.status === 304 && this.cache) {
-        const cachedData = this.cache.get(url);
-        if (cachedData !== undefined) {
+        const cachedEntry = this.cache.getEntry(url);
+        if (cachedEntry) {
           this.log.debug(`${logPrefix}Cache hit (304 Not Modified): ${url}`);
-          return cachedData as T;
+          // Rails still runs the action on a conditional GET, so a 304 carries
+          // fresh response headers (only the body is stripped). Prefer those;
+          // fall back to the meta captured when the body was cached.
+          return {
+            data: cachedEntry.data as T,
+            meta: extractMeta?.(response) ?? cachedEntry.meta,
+          };
         }
         // Cache miss despite 304 - shouldn't happen, but fetch fresh data
         this.log.warn(`${logPrefix}304 received but no cached data for: ${url}`);
@@ -294,7 +327,7 @@ export class FizzyClient {
         if (!isGetRequest && this.cache) {
           this.invalidateCacheForMutation(url);
         }
-        return undefined as T;
+        return { data: undefined as T, meta: undefined };
       }
 
       // Parse JSON response
@@ -315,9 +348,9 @@ export class FizzyClient {
             if (this.cache) {
               this.invalidateCacheForMutation(url);
             }
-            return { id, url: location } as T;
+            return { data: { id, url: location } as T, meta: undefined };
           }
-          return undefined as T;
+          return { data: undefined as T, meta: undefined };
         }
         throw new FizzyParseError(
           "Failed to parse API response as JSON",
@@ -325,11 +358,15 @@ export class FizzyClient {
         );
       }
 
+      // Single extraction path for response metadata: computed here, once, from a
+      // fresh response with a parsed body, then stored alongside it in the cache.
+      const meta = extractMeta?.(response);
+
       // Cache the response if ETag is present (for GET requests)
       if (isGetRequest && this.cache && response.headers) {
         const etag = response.headers.get("ETag");
         if (etag) {
-          this.cache.set(url, etag, data);
+          this.cache.set(url, etag, data, meta);
           this.log.debug(`${logPrefix}Cached response with ETag: ${etag}`);
         }
       }
@@ -339,7 +376,7 @@ export class FizzyClient {
         this.invalidateCacheForMutation(url);
       }
 
-      return data;
+      return { data, meta };
     } catch (error) {
       clearTimeout(timeoutId);
 
@@ -382,6 +419,101 @@ export class FizzyClient {
 
     const queryString = searchParams.toString();
     return queryString ? `?${queryString}` : "";
+  }
+
+  /**
+   * Read geared_pagination metadata off a list response.
+   *
+   * Returns undefined when neither header is present, which is the signal the
+   * 304 path uses to fall back to the metadata cached with the body.
+   */
+  private parsePaginationMeta(
+    response: Response
+  ): { totalCount: number | null; hasMore: boolean } | undefined {
+    // Defensive header access: mocked/partial responses may omit `headers` entirely.
+    const totalCountHeader = response.headers?.get?.("X-Total-Count") ?? null;
+    const linkHeader = response.headers?.get?.("Link") ?? null;
+
+    if (totalCountHeader === null && linkHeader === null) {
+      return undefined;
+    }
+
+    const trimmedTotal = totalCountHeader === null ? null : totalCountHeader.trim();
+    const totalCount =
+      trimmedTotal !== null && /^[0-9]+$/.test(trimmedTotal) && Number.isSafeInteger(Number(trimmedTotal))
+        ? Number(trimmedTotal)
+        : null;
+
+    // Upstream emits rel="next" on every page but the last.
+    const hasMore = linkHeader !== null && this.linkHeaderHasNextRel(linkHeader);
+
+    return { totalCount, hasMore };
+  }
+
+  /**
+   * Split on a separator that only counts at top level — i.e. outside RFC 8288
+   * quoted-strings (which may contain the separator, with \-escapes) and outside
+   * <URL> brackets.
+   */
+  private static splitTopLevel(input: string, separator: string): string[] {
+    const parts: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    let inAngle = false;
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i];
+      if (inQuotes) {
+        if (ch === "\\" && i + 1 < input.length) {
+          current += ch + input[i + 1];
+          i++;
+          continue;
+        }
+        if (ch === '"') inQuotes = false;
+        current += ch;
+      } else if (ch === '"') {
+        inQuotes = true;
+        current += ch;
+      } else if (ch === "<" && !inAngle) {
+        inAngle = true;
+        current += ch;
+      } else if (ch === ">" && inAngle) {
+        inAngle = false;
+        current += ch;
+      } else if (ch === separator && !inAngle) {
+        parts.push(current);
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    parts.push(current);
+    return parts;
+  }
+
+  /**
+   * True when an RFC 8288 Link header contains a link with relation type "next".
+   * Quoted strings never split link-values or params, and per RFC 8288 only the
+   * FIRST rel param of a link-value counts.
+   */
+  private linkHeaderHasNextRel(linkHeader: string): boolean {
+    for (const linkValue of FizzyClient.splitTopLevel(linkHeader, ",")) {
+      const urlEnd = linkValue.indexOf(">");
+      if (!linkValue.trimStart().startsWith("<") || urlEnd === -1) continue;
+      for (const param of FizzyClient.splitTopLevel(linkValue.slice(urlEnd + 1), ";")) {
+        const eq = param.indexOf("=");
+        if (eq === -1) continue;
+        if (param.slice(0, eq).trim().toLowerCase() !== "rel") continue;
+        // First rel wins (RFC 8288 §3.3); later rel params must be ignored.
+        let value = param.slice(eq + 1).trim();
+        if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+          value = value.slice(1, -1).replace(/\\(.)/g, "$1");
+        }
+        const isNext = value.toLowerCase().split(/\s+/).includes("next");
+        if (isNext) return true;
+        break;
+      }
+    }
+    return false;
   }
 
   // ============ Identity ============
@@ -474,20 +606,49 @@ export class FizzyClient {
   // ============ Cards ============
 
   /**
-   * Get all cards in an account with optional filters
+   * Get one page of cards in an account with optional filters.
+   *
+   * This endpoint is paginated with a server-controlled, variable page size, so
+   * the result is a page envelope ({@link CardsPage}) rather than a bare array.
+   * Pass `options.page` to walk further pages; nothing is aggregated here.
    * @endpoint GET /:account_slug/cards
    * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#get-account_slugcards
    */
   async getCards(
     accountSlug: string,
-    filters?: CardFilterOptions
-  ): Promise<FizzyCard[]> {
+    options?: CardListOptions
+  ): Promise<CardsPage> {
     const slug = this.normalizeSlug(accountSlug);
-    const queryString = filters ? this.buildQueryString(filters) : "";
-    return this.request<FizzyCard[]>(
+    const queryString = options ? this.buildQueryString(options) : "";
+    const requestedPage = options?.page ?? 1;
+
+    // The tool layer validates `page` separately; this defends direct client callers.
+    if (!Number.isSafeInteger(requestedPage) || requestedPage < 1) {
+      throw new Error("page must be a positive integer (1-based)");
+    }
+
+    const { data, meta } = await this.requestWithMeta<FizzyCard[]>(
       "GET",
-      `/${slug}/cards${queryString}`
+      `/${slug}/cards${queryString}`,
+      undefined,
+      (response) => this.parsePaginationMeta(response)
     );
+
+    // With no pagination headers to go on we report has_more: false /
+    // total_count: null rather than fabricating values.
+    const pagination = meta as { totalCount: number | null; hasMore: boolean } | undefined;
+    const hasMore = pagination?.hasMore ?? false;
+
+    return {
+      cards: data ?? [],
+      page: requestedPage,
+      total_count: pagination?.totalCount ?? null,
+      has_more: hasMore,
+      // Derived, not parsed out of the Link URL: offset portioning guarantees
+      // sequential integer pages, so parsing would only add failure modes that
+      // silently truncate iteration.
+      next_page: hasMore ? requestedPage + 1 : null,
+    };
   }
 
 

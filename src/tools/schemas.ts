@@ -155,6 +155,11 @@ export const getCardsSchema = z.object({
     "Text search to filter cards by content. Multi-word input is matched as a single search term. " +
     "Omit to return all cards (subject to other filters)."
   ),
+  page: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional().describe(
+    "Page number to fetch (1-based). Card listings are paginated with a server-controlled, variable page size " +
+    "(early pages are small, e.g. 15 cards; later pages are larger). Omit for the first page; " +
+    "pass the next_page value from the previous response to fetch subsequent pages."
+  ),
 });
 
 

@@ -214,7 +214,15 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
         terms: ["test"],
       });
 
-      expect(result).toEqual(mockCards);
+      // Paginated endpoint: the client returns a page envelope, and this mock
+      // response carries no pagination headers.
+      expect(result).toEqual({
+        cards: mockCards,
+        page: 1,
+        total_count: null,
+        has_more: false,
+        next_page: null,
+      });
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining("board_ids%5B%5D=board1"),
         expect.any(Object)
@@ -613,6 +621,92 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
         assignee_ids: ["u1"],
         tag_ids: ["t1"],
       });
+    });
+
+    it("passes a requested page through to the client", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
+
+      await toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+        page: 3,
+      });
+
+      expect(mockClient.getCards.mock.calls[0][1].page).toBe(3);
+    });
+
+    it("leaves page undefined when it is not given", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
+
+      await toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+      });
+
+      expect(mockClient.getCards.mock.calls[0][1].page).toBeUndefined();
+    });
+
+    it("coerces a digit-string page (LLM clients on the raw-args transport send \"2\")", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
+
+      await toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+        page: "2",
+      });
+
+      expect(mockClient.getCards.mock.calls[0][1].page).toBe(2);
+    });
+
+    it.each([0, -1, 1.5, "abc"])("rejects page %p", async (page) => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          page,
+        })
+      ).rejects.toThrow("page must be a positive integer (1-based), e.g. 2");
+      expect(mockClient.getCards).not.toHaveBeenCalled();
+    });
+
+    it("rejects a page number too large to be a safe integer", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          page: 1e100,
+        })
+      ).rejects.toThrow("page must be a positive integer (1-based), e.g. 2");
+      expect(mockClient.getCards).not.toHaveBeenCalled();
+    });
+
+    it("rejects an oversized digit-string page", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          page: "9".repeat(400),
+        })
+      ).rejects.toThrow("page must be a positive integer (1-based), e.g. 2");
+      expect(mockClient.getCards).not.toHaveBeenCalled();
+    });
+
+    it("returns the page envelope from the client unchanged", async () => {
+      const envelope = {
+        cards: [{ id: "card1" }],
+        page: 2,
+        total_count: 238,
+        has_more: true,
+        next_page: 3,
+      };
+      const mockClient = { getCards: vi.fn().mockResolvedValue(envelope) };
+
+      const result = await toolHandlers.fizzy_get_cards(
+        mockClient as unknown as FizzyClient,
+        { account_slug: "123", page: 2 }
+      );
+
+      expect(result).toEqual(envelope);
     });
 
     it("leaves board_ids/column_ids/terms undefined when no filters are given", async () => {

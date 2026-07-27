@@ -436,7 +436,14 @@ describe("FizzyClient", () => {
         expect.stringContaining("terms%5B%5D=urgent+task"),
         expect.any(Object)
       );
-      expect(result).toEqual(mockCards);
+      // No pagination headers on this mock: report what we know, invent nothing.
+      expect(result).toEqual({
+        cards: mockCards,
+        page: 1,
+        total_count: null,
+        has_more: false,
+        next_page: null,
+      });
     });
 
     // Expected URL: GET /:account_slug/cards/:card_id
@@ -514,6 +521,435 @@ describe("FizzyClient", () => {
           method: "DELETE",
         })
       );
+    });
+  });
+
+  /**
+   * Cards pagination
+   * GET /:account_slug/cards is paginated upstream (geared_pagination, offset mode).
+   * Every page but the last carries `Link: <...?page=N+1>; rel="next"`, and every
+   * page carries `X-Total-Count` with the total number of FILTERED cards.
+   */
+  describe("Cards pagination", () => {
+    const paginationHeaders = (values: Record<string, string>) => {
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(values)) {
+        headers.set(name, value);
+      }
+      return headers;
+    };
+
+    it("reports total_count, has_more and next_page from the response headers", async () => {
+      const mockCards = [{ id: "card1", title: "Card 1" }];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          "X-Total-Count": "238",
+          Link: '<https://app.fizzy.do/123/cards?page=2>; rel="next"',
+        }),
+        json: async () => mockCards,
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result).toEqual({
+        cards: mockCards,
+        page: 1,
+        total_count: 238,
+        has_more: true,
+        next_page: 2,
+      });
+    });
+
+    it("sends ?page= only when a page is requested", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({ "X-Total-Count": "238" }),
+        json: async () => [],
+      });
+
+      const result = await client.getCards("123", { page: 2 });
+
+      expect(mockFetch.mock.calls[0][0] as string).toContain("page=2");
+      expect(result.page).toBe(2);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({ "X-Total-Count": "238" }),
+        json: async () => [],
+      });
+
+      await client.getCards("123", { indexed_by: "closed" });
+
+      expect(mockFetch.mock.calls[1][0] as string).not.toContain("page=");
+    });
+
+    it("derives next_page from the requested page, not from the Link URL", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          "X-Total-Count": "238",
+          // Deliberately inconsistent page number in the URL - it must be ignored.
+          Link: '<https://app.fizzy.do/123/cards?page=99>; rel="next"',
+        }),
+        json: async () => [{ id: "card16" }],
+      });
+
+      const result = await client.getCards("123", { page: 2 });
+
+      expect(result.page).toBe(2);
+      expect(result.next_page).toBe(3);
+    });
+
+    it("treats a Link header without rel=next as the last page", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          "X-Total-Count": "43",
+          Link: '<https://app.fizzy.do/123/cards?page=4>; rel="prev"',
+        }),
+        json: async () => [{ id: "card43" }],
+      });
+
+      const result = await client.getCards("123", { page: 5 });
+
+      expect(result.has_more).toBe(false);
+      expect(result.next_page).toBeNull();
+      expect(result.total_count).toBe(43);
+    });
+
+    it("accepts an unquoted rel=next (RFC 8288)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: "<https://app.fizzy.do/123/cards?page=2>; rel=next",
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(true);
+      expect(result.next_page).toBe(2);
+    });
+
+    it("reports total_count null when X-Total-Count is not a number", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({ "X-Total-Count": "abc" }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.total_count).toBeNull();
+    });
+
+    it("reports total_count null for a header with trailing junk", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({ "X-Total-Count": "12junk" }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.total_count).toBeNull();
+    });
+
+    it("reports total_count null for a negative header value", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({ "X-Total-Count": "-5" }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.total_count).toBeNull();
+    });
+
+    it("does not treat rel=\"xrel\" as a next link (false positive guard)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://app.fizzy.do/123/cards?page=2>; xrel="next"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+      expect(result.next_page).toBeNull();
+    });
+
+    it("does not treat rel=\"next-page\" as a next link (false positive guard)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://app.fizzy.do/123/cards?page=2>; rel="next-page"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+      expect(result.next_page).toBeNull();
+    });
+
+    it("treats a quoted rel token list containing next as a next link", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://app.fizzy.do/123/cards?page=2>; rel="prev next"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(true);
+      expect(result.next_page).toBe(2);
+    });
+
+    it("finds rel=next among multiple links in the same header", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link:
+            '<https://app.fizzy.do/123/cards?page=1>; rel="prev", ' +
+            '<https://app.fizzy.do/123/cards?page=3>; rel="next"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123", { page: 2 });
+
+      expect(result.has_more).toBe(true);
+      expect(result.next_page).toBe(3);
+    });
+
+    it("does not let a quoted title fabricate a rel=next param (false positive guard)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://example/cards>; title="literal; rel=next; suffix"; rel="prev"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+    });
+
+    it("does not let a quoted comma fabricate a link-value (false positive guard)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://x/a>; title="see also, <https://x/b>; rel=next"; rel="prev"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+    });
+
+    it("finds a real rel=next after a quoted param containing a semicolon", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://x/a>; title="x; y"; rel="next"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(true);
+    });
+
+    it("honors only the first rel param on a link-value (RFC 8288)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://x/a>; rel="prev"; rel="next"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+    });
+
+    it("does not let an escaped quote inside a quoted string fabricate rel=next", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          Link: '<https://x/a>; title="say \\" ; rel=next"; rel="prev"',
+        }),
+        json: async () => [{ id: "card1" }],
+      });
+
+      const result = await client.getCards("123");
+
+      expect(result.has_more).toBe(false);
+    });
+
+    it("returns an empty cards array when the requested page is past the end", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          "X-Total-Count": "43",
+          // Upstream keeps advertising a next page past the end, hence the
+          // documented "stop on has_more false OR empty cards" rule.
+          Link: '<https://app.fizzy.do/123/cards?page=1000>; rel="next"',
+        }),
+        json: async () => [],
+      });
+
+      const result = await client.getCards("123", { page: 999 });
+
+      expect(result.cards).toEqual([]);
+      expect(result.has_more).toBe(true);
+    });
+
+    it("reuses cached pagination metadata on a 304 that omits the headers", async () => {
+      const mockCards = [{ id: "card1", title: "Card 1" }];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          ETag: 'W/"cards1"',
+          "X-Total-Count": "238",
+          Link: '<https://app.fizzy.do/123/cards?page=2>; rel="next"',
+        }),
+        json: async () => mockCards,
+      });
+
+      const first = await client.getCards("123");
+      expect(first.total_count).toBe(238);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 304,
+        headers: paginationHeaders({ ETag: 'W/"cards1"' }),
+      });
+
+      const second = await client.getCards("123");
+
+      expect(mockFetch.mock.calls[1][1].headers["If-None-Match"]).toBe('W/"cards1"');
+      expect(second).toEqual({
+        cards: mockCards,
+        page: 1,
+        total_count: 238,
+        has_more: true,
+        next_page: 2,
+      });
+    });
+
+    it("prefers pagination headers carried by the 304 itself over cached metadata", async () => {
+      const mockCards = [{ id: "card1", title: "Card 1" }];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: paginationHeaders({
+          ETag: 'W/"cards1"',
+          "X-Total-Count": "238",
+          Link: '<https://app.fizzy.do/123/cards?page=2>; rel="next"',
+        }),
+        json: async () => mockCards,
+      });
+
+      await client.getCards("123");
+
+      // Rails runs the action for conditional GETs, so a 304 still carries fresh
+      // counts - here the total changed and the next-page link is gone.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 304,
+        headers: paginationHeaders({ ETag: 'W/"cards1"', "X-Total-Count": "240" }),
+      });
+
+      const second = await client.getCards("123");
+
+      expect(second).toEqual({
+        cards: mockCards,
+        page: 1,
+        total_count: 240,
+        has_more: false,
+        next_page: null,
+      });
+    });
+
+    it("builds the envelope from the successful attempt after a retry", async () => {
+      const clientWithRetry = new FizzyClient({
+        accessToken: "test-token",
+        baseUrl: "https://app.fizzy.do",
+        maxRetries: 2,
+        retryBaseDelay: 10,
+      });
+      const mockCards = [{ id: "card1", title: "Card 1" }];
+      const failedHeadersGet = vi.fn(() => {
+        throw new Error("must not read headers of a failed response");
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error",
+          headers: { get: failedHeadersGet },
+          text: async () => "Error",
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: paginationHeaders({
+            "X-Total-Count": "238",
+            Link: '<https://app.fizzy.do/123/cards?page=2>; rel="next"',
+          }),
+          json: async () => mockCards,
+        });
+
+      const result = await clientWithRetry.getCards("123");
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(failedHeadersGet).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        cards: mockCards,
+        page: 1,
+        total_count: 238,
+        has_more: true,
+        next_page: 2,
+      });
     });
   });
 

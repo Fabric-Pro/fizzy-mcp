@@ -102,6 +102,22 @@ describe("Tool Schemas", () => {
       ).toBe(true);
     });
 
+    it("getCardsSchema should accept a positive integer page", () => {
+      expect(getCardsSchema.safeParse({ account_slug: "123", page: 2 }).success).toBe(true);
+    });
+
+    it("getCardsSchema should reject non-positive, fractional, or string pages", () => {
+      expect(getCardsSchema.safeParse({ account_slug: "123", page: 0 }).success).toBe(false);
+      expect(getCardsSchema.safeParse({ account_slug: "123", page: 1.5 }).success).toBe(false);
+      // Strict on purpose: the MCP SDK advertises and validates an integer here.
+      expect(getCardsSchema.safeParse({ account_slug: "123", page: "2" }).success).toBe(false);
+    });
+
+    it("getCardsSchema should reject a page beyond MAX_SAFE_INTEGER", () => {
+      // Number.isInteger(1e100) is true, so this only fails once .max() is checked.
+      expect(getCardsSchema.safeParse({ account_slug: "123", page: 1e100 }).success).toBe(false);
+    });
+
     it("getCardSchema should require account_slug and card_id", () => {
       expect(
         getCardSchema.safeParse({ account_slug: "123", card_id: "card1" }).success
