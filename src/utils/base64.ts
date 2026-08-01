@@ -20,9 +20,28 @@ export function bytesToBase64(bytes: Uint8Array): string {
 /** base64url characters mapped to their standard equivalents; whitespace drops. */
 const BASE64URL_REPLACEMENTS: Record<string, string> = { "-": "+", _: "/" };
 
+/** Stateless (no /g), so `.test` does not carry lastIndex between calls. */
+const WHITESPACE = /\s/;
+
 /** Bytes a normalized, unpadded base64 string decodes to: 4 characters carry 3. */
 function decodedLength(unpaddedBase64: string): number {
   return Math.floor((unpaddedBase64.length * 3) / 4);
+}
+
+/**
+ * How many characters actually encode data, counted without building a copy of
+ * the input: whitespace is dropped by normalization, `=` is padding, and the
+ * base64url swaps are one-for-one. Excluding `=` matters — counting it would
+ * overestimate by up to two bytes and reject a payload sitting exactly on the
+ * limit.
+ */
+function significantLength(input: string): number {
+  let count = 0;
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i];
+    if (char !== "=" && !WHITESPACE.test(char)) count++;
+  }
+  return count;
 }
 
 /**
@@ -30,15 +49,29 @@ function decodedLength(unpaddedBase64: string): number {
  * as well — MCP clients produce both, and rejecting them would surface as an
  * opaque "invalid base64" for input that is perfectly recoverable.
  *
- * `maxBytes` bounds the decode itself rather than its result. Decoding is where
- * the memory goes — `atob` materializes a string the size of the output, and the
- * copy below materializes it again as bytes — so a caller-supplied limit has to
- * be checked before that work, not after it. The size is computed from the
- * encoded length, which is exact and costs nothing.
+ * `maxBytes` bounds the work this function does, not merely its result. Every
+ * step here allocates something proportional to the input — normalization copies
+ * the string, `atob` materializes the output, and the loop below materializes it
+ * again as bytes — so the limit is enforced ahead of all of them. Sizes come from
+ * character counts, which are exact for base64 and need no allocation.
  *
  * @throws Error when the input is not decodable, or would exceed `maxBytes`.
  */
 export function base64ToBytes(input: string, maxBytes?: number): Uint8Array {
+  // Reject before normalizing, not just before decoding: normalization copies the
+  // whole input, so a check placed after it would still let a caller force an
+  // allocation the size of their payload. The length comparison clears every
+  // input that cannot possibly be over the limit, so only suspiciously long ones
+  // pay for the counting scan, which allocates nothing.
+  if (maxBytes !== undefined && input.length > Math.ceil(maxBytes / 3) * 4) {
+    const decoded = Math.floor((significantLength(input) * 3) / 4);
+    if (decoded > maxBytes) {
+      throw new Error(
+        `base64_data decodes to ${decoded} bytes, over the ${maxBytes}-byte upload limit`
+      );
+    }
+  }
+
   // One pass: each additional pass copies the whole string, which is precisely
   // the allocation this function is trying not to make on hostile input.
   const normalized = input.replace(

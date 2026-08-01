@@ -59,10 +59,43 @@ describe("base64ToBytes", () => {
       const oversized = "A".repeat(4000); // decodes to 3000 bytes
       const atobSpy = vi.spyOn(globalThis, "atob");
 
-      expect(() => base64ToBytes(oversized, 1000)).toThrow(/over the 1000-byte upload limit/);
-      expect(atobSpy).not.toHaveBeenCalled();
+      try {
+        expect(() => base64ToBytes(oversized, 1000)).toThrow(/over the 1000-byte upload limit/);
+        expect(atobSpy).not.toHaveBeenCalled();
+      } finally {
+        // In a finally so a failing assertion above cannot leave the global spied.
+        atobSpy.mockRestore();
+      }
+    });
 
-      atobSpy.mockRestore();
+    // The guard has to bound its own cost, not just the decode: normalization
+    // copies the whole input, so an over-limit payload must be refused before it.
+    it("rejects an oversized payload without normalizing it first", () => {
+      const replaceSpy = vi.spyOn(String.prototype, "replace");
+
+      try {
+        expect(() => base64ToBytes("A".repeat(4000), 1000)).toThrow(/upload limit/);
+        expect(replaceSpy).not.toHaveBeenCalled();
+      } finally {
+        replaceSpy.mockRestore();
+      }
+    });
+
+    // Whitespace collapses away, so a long-but-mostly-blank payload is small once
+    // decoded. It must not be rejected on raw length alone.
+    it("does not reject a long payload that is mostly whitespace", () => {
+      const padded = " ".repeat(20000) + Buffer.from("hi", "utf8").toString("base64");
+
+      expect(new TextDecoder().decode(base64ToBytes(padded, 1000))).toBe("hi");
+    });
+
+    it("accepts a padded payload sitting exactly on the limit", () => {
+      // 2 bytes encodes as "aGk=" — counting the '=' would overestimate by one
+      // byte and reject this, so padding must be excluded from the estimate.
+      for (const size of [998, 999, 1000]) {
+        const bytes = new Uint8Array(randomBytes(size));
+        expect(base64ToBytes(bytesToBase64(bytes), 1000).length).toBe(size);
+      }
     });
 
     it("reports the decoded size it computed", () => {

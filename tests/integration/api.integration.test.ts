@@ -30,6 +30,7 @@
 
 import { describe, it, expect, beforeAll } from "vitest";
 import { FizzyClient } from "../../src/client/fizzy-client.js";
+import { attachmentHtml } from "../../src/utils/attachments.js";
 
 const FIZZY_ACCESS_TOKEN = process.env.FIZZY_ACCESS_TOKEN;
 const shouldRun = !!FIZZY_ACCESS_TOKEN;
@@ -384,6 +385,82 @@ describe.skipIf(!shouldRun)("Fizzy API Integration Tests", () => {
   // ==========================================
   // PHASE 4: DELETE - Delete all created resources (clean slate)
   // ==========================================
+  // ==========================================
+  // PHASE 3.5: ATTACHMENTS - Real upload, real render
+  // ==========================================
+  // Unit tests cannot prove this flow works: they stub the network, and both ways
+  // it fails upstream — a hex checksum, and the wrong signed id in the sgid
+  // attribute — are accepted by a stub while the real service rejects one and
+  // silently renders the other broken. So the round trip is exercised here
+  // against the live API, gated on a token exactly like the rest of this file.
+  describe("Phase 3.5: ATTACHMENTS - Upload and render", () => {
+    beforeAll(() => {
+      console.log("\n📎 Phase 3.5: Uploading a real file and attaching it...\n");
+    });
+
+    // A real 16x8 PNG. Small enough to inline, structured enough that the server
+    // reports its dimensions back, which is what proves the bytes arrived intact.
+    const PNG_BASE64 =
+      "iVBORw0KGgoAAAANSUhEUgAAABAAAAAICAIAAAB/FOjAAAAAHUlEQVR42mPYKSPDX5ZHPMlAkuqdMjIMozYQQQIAumx5AQMTQzEAAAAASUVORK5CYII=";
+    const pngBytes = Uint8Array.from(atob(PNG_BASE64), (c) => c.charCodeAt(0));
+
+    let attachableSgid = "";
+
+    it("POST /:account_slug/rails/active_storage/direct_uploads - uploads a real file", async () => {
+      const upload = await client!.uploadFile(testData.accountSlug, {
+        bytes: pngBytes,
+        filename: "integration-attachment.png",
+        contentType: "image/png",
+      });
+
+      // Reaching here at all means the Base64-encoded MD5 matched the bytes: the
+      // direct-upload endpoint rejects a mismatched checksum.
+      expect(upload.attachable_sgid).toBeTruthy();
+      expect(upload.byte_size).toBe(pngBytes.length);
+      expect(upload.filename).toBe("integration-attachment.png");
+
+      // The trap: both are signed tokens for this same blob, and only the
+      // attachable one resolves in rich text. They must not be conflated.
+      expect(upload.signed_id).toBeTruthy();
+      expect(upload.attachable_sgid).not.toBe(upload.signed_id);
+
+      attachableSgid = upload.attachable_sgid;
+      console.log(`✓ Uploaded: ${upload.byte_size} bytes, blob ${upload.id}`);
+    });
+
+    it("attaches the upload to a comment and the server resolves it", async () => {
+      expect(attachableSgid).toBeTruthy();
+
+      const comment = await client!.createCardComment(
+        testData.accountSlug,
+        testData.createdCardNumber,
+        { body: `<p>Integration attachment:</p>${attachmentHtml(attachableSgid)}` }
+      );
+
+      const fetched = await client!.getComment(
+        testData.accountSlug,
+        testData.createdCardNumber,
+        comment.id
+      );
+
+      // Rich text comes back as { plain_text, html }, despite the declared type.
+      const body = fetched.body as unknown as { html?: string } | string;
+      const html = typeof body === "string" ? body : body?.html ?? "";
+
+      expect(html).toContain("action-text-attachment");
+      // A <figure> means the server resolved the blob. The placeholder glyph means
+      // it accepted the tag and could not resolve it — the silent failure mode.
+      expect(html).toContain("<figure");
+      expect(html).not.toContain(">☒<");
+      // Dimensions come from the server analysing the stored bytes, so they match
+      // only if the right file actually reached storage.
+      expect(html).toContain('width="16"');
+      expect(html).toContain('height="8"');
+
+      console.log("✓ Attachment rendered and resolved by the server");
+    });
+  });
+
   describe("Phase 4: DELETE - Clean Up (Clean Slate)", () => {
     beforeAll(() => {
       console.log("\n🧹 Phase 4: Deleting test resources (clean slate)...\n");
