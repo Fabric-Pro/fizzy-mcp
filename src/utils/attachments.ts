@@ -2,10 +2,12 @@
  * Turning a tool call's arguments into the bytes Fizzy's direct-upload flow
  * needs, plus the ActionText markup that references the result.
  *
- * Validation lives here rather than in the Zod schema because the Cloudflare
- * transport executes raw arguments without Zod — the same reason
- * `parseCardsPage` in tools/handlers.ts validates by hand. The Zod schema
- * mirrors these rules so stdio clients get them at the protocol layer too.
+ * Validation lives here rather than in the Zod schema, for two reasons: the
+ * Cloudflare transport executes raw arguments without Zod at all — the same
+ * reason `parseCardsPage` in tools/handlers.ts validates by hand — and the
+ * either/or rules cannot be expressed as Zod refinements without turning the
+ * schema into a ZodEffects, which `McpServer.registerTool` publishes to stdio
+ * clients as an empty property list. So this is the only place they live.
  */
 
 import { base64ToBytes } from "./base64.js";
@@ -51,7 +53,7 @@ export interface ResolvedAttachment {
 /** Strip any directory component, handling both POSIX and Windows separators. */
 function basename(path: string): string {
   const segments = path.split(/[/\\]/);
-  return segments[segments.length - 1] || "";
+  return segments[segments.length - 1];
 }
 
 export function contentTypeForFilename(filename: string): string {

@@ -10,6 +10,7 @@ import { getToolDefinition } from "../../src/tools/definitions.js";
 import { toolInputJsonSchema } from "../../src/tools/json-schema.js";
 import { uploadFileSchema } from "../../src/tools/schemas.js";
 import { setLocalFileReader } from "../../src/utils/file-source.js";
+import type { ResolvedAttachment } from "../../src/utils/attachments.js";
 import type { FizzyClient } from "../../src/client/fizzy-client.js";
 
 // The two tokens the API returns for one blob. Only the attachable one renders.
@@ -57,11 +58,8 @@ describe("fizzy_upload_file definition", () => {
     expect(description).toContain("fizzy_create_comment");
   });
 
-  it("publishes a valid JSON Schema with all four inputs", () => {
-    const schema = toolInputJsonSchema(uploadFileSchema) as {
-      properties?: Record<string, unknown>;
-    };
-    const published = JSON.stringify(schema);
+  it("publishes a JSON Schema carrying every input", () => {
+    const published = JSON.stringify(toolInputJsonSchema(uploadFileSchema));
 
     for (const field of ["account_slug", "file_path", "base64_data", "filename", "content_type"]) {
       expect(published).toContain(field);
@@ -147,8 +145,12 @@ describe("fizzy_upload_file handler", () => {
   });
 
   it("passes the decoded bytes and resolved metadata to the client", async () => {
-    let seen: { slug: string; file: any } | undefined;
-    await executeToolHandler(clientStub((slug, file) => (seen = { slug, file: file as any })), "fizzy_upload_file", {
+    let seen: { slug: string; file: ResolvedAttachment } | undefined;
+    const client = clientStub((slug, file) => {
+      seen = { slug, file: file as ResolvedAttachment };
+    });
+
+    await executeToolHandler(client, "fizzy_upload_file", {
       account_slug: "/123456",
       base64_data: base64("hello"),
       filename: "screenshot.png",

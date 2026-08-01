@@ -51,7 +51,13 @@ const K = [
   0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
 ];
 
-/** Raw 16-byte MD5 digest. */
+/**
+ * Raw 16-byte MD5 digest.
+ *
+ * The padded-length arithmetic below is 32-bit, so inputs at or beyond 4 GiB
+ * would wrap. Callers here are bounded far below that by MAX_ATTACHMENT_BYTES;
+ * anything streaming larger input would need a chunked digest anyway.
+ */
 export function md5(input: Uint8Array): Uint8Array {
   // Message + a mandatory 0x80 byte + zero padding to 56 mod 64 + an 8-byte length.
   const paddedLength = (((input.length + 8) >>> 6) + 1) << 6;
