@@ -17,16 +17,43 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/** base64url characters mapped to their standard equivalents; whitespace drops. */
+const BASE64URL_REPLACEMENTS: Record<string, string> = { "-": "+", _: "/" };
+
+/** Bytes a normalized, unpadded base64 string decodes to: 4 characters carry 3. */
+function decodedLength(unpaddedBase64: string): number {
+  return Math.floor((unpaddedBase64.length * 3) / 4);
+}
+
 /**
  * Decode base64 to bytes, accepting the base64url alphabet and missing padding
  * as well — MCP clients produce both, and rejecting them would surface as an
  * opaque "invalid base64" for input that is perfectly recoverable.
  *
- * @throws Error when the input is not decodable as base64.
+ * `maxBytes` bounds the decode itself rather than its result. Decoding is where
+ * the memory goes — `atob` materializes a string the size of the output, and the
+ * copy below materializes it again as bytes — so a caller-supplied limit has to
+ * be checked before that work, not after it. The size is computed from the
+ * encoded length, which is exact and costs nothing.
+ *
+ * @throws Error when the input is not decodable, or would exceed `maxBytes`.
  */
-export function base64ToBytes(input: string): Uint8Array {
-  const normalized = input.replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+export function base64ToBytes(input: string, maxBytes?: number): Uint8Array {
+  // One pass: each additional pass copies the whole string, which is precisely
+  // the allocation this function is trying not to make on hostile input.
+  const normalized = input.replace(
+    /\s+|[-_]/g,
+    (match) => BASE64URL_REPLACEMENTS[match] ?? ""
+  );
+  const unpadded = normalized.replace(/=+$/, "");
+
+  if (maxBytes !== undefined && decodedLength(unpadded) > maxBytes) {
+    throw new Error(
+      `base64_data decodes to ${decodedLength(unpadded)} bytes, over the ${maxBytes}-byte upload limit`
+    );
+  }
+
+  const padded = unpadded.padEnd(Math.ceil(unpadded.length / 4) * 4, "=");
 
   let binary: string;
   try {

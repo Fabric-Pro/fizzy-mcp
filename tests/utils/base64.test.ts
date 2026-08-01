@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import { base64ToBytes, bytesToBase64 } from "../../src/utils/base64.js";
 
@@ -49,5 +49,41 @@ describe("base64ToBytes", () => {
 
   it("rejects input that is not base64 with a message naming the argument", () => {
     expect(() => base64ToBytes("not valid base64!!")).toThrow(/base64_data is not valid base64/);
+  });
+
+  describe("maxBytes", () => {
+    // The guard exists to stop a remote caller forcing a large allocation, so it
+    // has to reject BEFORE decoding — asserting the size alone would still pass
+    // if the check were moved after atob().
+    it("rejects before decoding, not after", () => {
+      const oversized = "A".repeat(4000); // decodes to 3000 bytes
+      const atobSpy = vi.spyOn(globalThis, "atob");
+
+      expect(() => base64ToBytes(oversized, 1000)).toThrow(/over the 1000-byte upload limit/);
+      expect(atobSpy).not.toHaveBeenCalled();
+
+      atobSpy.mockRestore();
+    });
+
+    it("reports the decoded size it computed", () => {
+      expect(() => base64ToBytes("A".repeat(4000), 1000)).toThrow(/decodes to 3000 bytes/);
+    });
+
+    it("accepts input exactly at the limit", () => {
+      const bytes = new Uint8Array(randomBytes(999));
+      const encoded = bytesToBase64(bytes);
+
+      expect(base64ToBytes(encoded, 999).length).toBe(999);
+    });
+
+    it("does not count padding or whitespace toward the limit", () => {
+      // 2 bytes encodes as "aGk=" — the '=' and any wrapping must not push it over.
+      const encoded = Buffer.from("hi", "utf8").toString("base64");
+      expect(base64ToBytes(encoded.slice(0, 2) + "\n " + encoded.slice(2), 2).length).toBe(2);
+    });
+
+    it("is unbounded when no limit is given", () => {
+      expect(base64ToBytes("A".repeat(4000)).length).toBe(3000);
+    });
   });
 });

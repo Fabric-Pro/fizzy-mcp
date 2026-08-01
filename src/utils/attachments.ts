@@ -129,7 +129,9 @@ export async function resolveAttachment(
     if (!explicitFilename) {
       throw new Error("filename is required when uploading with base64_data");
     }
-    bytes = base64ToBytes(base64Data);
+    // Bound passed through so the limit is enforced before the decode allocates,
+    // not after: this path is reachable by remote callers on http/sse/Workers.
+    bytes = base64ToBytes(base64Data, MAX_ATTACHMENT_BYTES);
     filename = basename(explicitFilename);
   } else {
     throw new Error(
