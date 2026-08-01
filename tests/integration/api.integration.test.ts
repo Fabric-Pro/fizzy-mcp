@@ -295,9 +295,9 @@ describe.skipIf(!shouldRun)("Fizzy API Integration Tests", () => {
       expect(typeof comment.body).toBe("object");
       expect(typeof comment.body.html).toBe("string");
       expect(typeof comment.body.plain_text).toBe("string");
-      // The failure this prevents: string operations on `body` compile and then
-      // silently operate on "[object Object]".
-      expect(String(comment.body)).toBe("[object Object]");
+      // The html carries the markup, which is what made the old `string` type
+      // actively harmful: substring searches for tags silently found nothing.
+      expect(comment.body.html).toContain("<");
 
       console.log(`✓ Read: body is { plain_text, html }`);
     });

@@ -293,9 +293,10 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
 
   describe("Comment Operations", () => {
     it("getCardComments retrieves comments for a card", async () => {
+      // Comment bodies come back as rich text, not strings.
       const mockComments = [
-        { id: "comment1", body: "First comment" },
-        { id: "comment2", body: "Second comment" },
+        { id: "comment1", body: { plain_text: "First comment", html: "<div>First comment</div>" } },
+        { id: "comment2", body: { plain_text: "Second comment", html: "<div>Second comment</div>" } },
       ];
 
       mockFetch.mockResolvedValueOnce(mockResponse(mockComments));
@@ -310,7 +311,10 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
     });
 
     it("createCardComment creates a comment", async () => {
-      const mockComment = { id: "comment1", body: "New comment" };
+      const mockComment = {
+        id: "comment1",
+        body: { plain_text: "New comment", html: "<div>New comment</div>" },
+      };
 
       mockFetch.mockResolvedValueOnce(mockResponse(mockComment, 201));
 
