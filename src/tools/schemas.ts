@@ -246,34 +246,46 @@ export const deleteCardSchema = z.object({
   card_id: cardNumberSchema,
 });
 
-// Comment schemas with HTML formatting guidance
+// Comment schemas with HTML formatting guidance.
+//
+// These deliberately carry no `.refine()`. McpServer reads a tool's fields off
+// its schema's shape, and refining produces a ZodEffects, which has none — so a
+// refined schema publishes `{"type":"object","properties":{}}` to stdio clients
+// and leaves the model unable to see any argument at all.
+//
+// The "one of card_id or card_number" rule is not lost by dropping it here: it
+// is enforced a layer down by resolveCardNumber, which throws when neither is
+// supplied. That layer has to own it regardless, because the Cloudflare
+// transport dispatches raw arguments without running Zod at all — so before
+// this, stdio and Cloudflare rejected the same call with different errors.
 const commentCardSelectorBase = z.object({
   account_slug: accountSlugSchema,
-  card_id: cardIdSchema.optional(),
-  card_number: cardNumberSchema.optional(),
+  card_id: cardIdSchema
+    .optional()
+    .describe(
+      "The unique card identifier (numeric string, e.g., '67890'). " +
+      "Provide either card_id or card_number. " +
+      "Get available card IDs from fizzy_get_cards."
+    ),
+  card_number: cardNumberSchema
+    .optional()
+    .describe(
+      "The card number - the visible ID shown on the board (e.g., '#123'). " +
+      "Provide either card_id or card_number."
+    ),
 });
 
-const cardSelectorRefinement = (data: { card_id?: string; card_number?: string }) =>
-  Boolean(data.card_id || data.card_number);
+export const getCardCommentsSchema = commentCardSelectorBase;
 
-const cardSelectorRefinementMessage = { message: "Provide either card_id or card_number." };
-
-export const getCardCommentsSchema = commentCardSelectorBase.refine(
-  cardSelectorRefinement,
-  cardSelectorRefinementMessage
-);
-
-export const createCommentSchema = commentCardSelectorBase
-  .extend({
-    body: z.string().describe(
-      "Comment content (required). Supports HTML formatting: " +
-      "<b>bold</b>, <i>italic</i>, <a href='...'>links</a>, <code>code</code>, " +
-      "<ul><li>bullet lists</li></ul>, <ol><li>numbered lists</li></ol>, " +
-      "<pre>code blocks</pre>, <blockquote>quotes</blockquote>. " +
-      "Use plain text for simple comments."
-    ),
-  })
-  .refine(cardSelectorRefinement, cardSelectorRefinementMessage);
+export const createCommentSchema = commentCardSelectorBase.extend({
+  body: z.string().describe(
+    "Comment content (required). Supports HTML formatting: " +
+    "<b>bold</b>, <i>italic</i>, <a href='...'>links</a>, <code>code</code>, " +
+    "<ul><li>bullet lists</li></ul>, <ol><li>numbered lists</li></ol>, " +
+    "<pre>code blocks</pre>, <blockquote>quotes</blockquote>. " +
+    "Use plain text for simple comments."
+  ),
+});
 
 export const deleteCommentSchema = z.object({
   account_slug: accountSlugSchema,
