@@ -505,7 +505,7 @@ npx fizzy-mcp --transport http --port 3000
 
 ---
 
-## Available Tools (47 total)
+## Available Tools (50 total)
 
 ### Identity & Accounts (3)
 | Tool | Description |
@@ -599,6 +599,58 @@ npx fizzy-mcp --transport http --port 3000
 | `fizzy_mark_notification_unread` | Mark notification as unread |
 | `fizzy_mark_all_notifications_read` | Mark all notifications as read |
 
+### Attachments (1)
+| Tool | Description |
+|------|-------------|
+| `fizzy_upload_file` | Upload a file and get back HTML that embeds it in rich text |
+
+#### Attaching a file to a card or comment
+
+`fizzy_upload_file` uploads the file and returns an `attachment_html` snippet. It
+does not attach anything by itself — every rich-text field already accepts HTML,
+so you include the snippet wherever you want the file to appear:
+
+```jsonc
+// 1. Upload. Use file_path locally, or base64_data anywhere.
+{ "name": "fizzy_upload_file",
+  "arguments": { "account_slug": "123456", "file_path": "/tmp/screenshot.png" } }
+
+// Returns:
+// {
+//   "attachable_sgid": "eyJfcmFpbHMi...",
+//   "filename": "screenshot.png",
+//   "content_type": "image/png",
+//   "byte_size": 8124,
+//   "attachment_html": "<action-text-attachment sgid=\"eyJfcmFpbHMi...\"></action-text-attachment>"
+// }
+
+// 2. Reference it in any rich-text field — a comment body here, but a card
+//    description works the same way.
+{ "name": "fizzy_create_comment",
+  "arguments": {
+    "account_slug": "123456",
+    "card_number": "42",
+    "body": "<p>Steps to reproduce:</p><action-text-attachment sgid=\"eyJfcmFpbHMi...\"></action-text-attachment>"
+  } }
+```
+
+Use `attachment_html` verbatim. It carries the blob's `attachable_sgid`, which is
+the only token ActionText resolves; a hand-built tag using some other signed id
+will save without error and then render as a broken-attachment placeholder.
+
+**File input:** provide exactly one of `file_path` or `base64_data`.
+
+| Input | stdio | HTTP / SSE | Cloudflare Workers |
+|-------|-------|-----------|--------------------|
+| `base64_data` (+ `filename`) | ✅ | ✅ | ✅ |
+| `file_path` | ✅ | ❌ rejected | ❌ rejected |
+
+`file_path` is accepted only on stdio, where the MCP client and the server are
+the same user, so the server reads nothing that user could not already read. The
+HTTP and SSE transports serve remote callers — honouring a path there would let a
+client read the *server's* disk — and Workers have no filesystem. Uploads are
+capped at 10 MB on both paths.
+
 ---
 
 ## Example Prompts
@@ -611,6 +663,7 @@ Once configured, you can ask your AI assistant things like:
 - "What cards are assigned to me?"
 - "Move the 'Design review' card to the 'Done' column"
 - "Add a comment to the authentication card saying 'Ready for review'"
+- "Attach this screenshot to card 42 as evidence"
 - "Show me my unread notifications"
 - "List all users in my account"
 - "Create a new column called 'In Review' with blue color on the Engineering board"

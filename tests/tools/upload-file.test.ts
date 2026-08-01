@@ -73,7 +73,7 @@ describe("fizzy_upload_file schema", () => {
   it("accepts base64_data with a filename", () => {
     expect(
       uploadFileSchema.safeParse({
-        account_slug: "6117483",
+        account_slug: "123456",
         base64_data: base64("x"),
         filename: "a.txt",
       }).success
@@ -105,7 +105,7 @@ describe("fizzy_upload_file schema", () => {
 describe("fizzy_upload_file handler", () => {
   it("builds the HTML from attachable_sgid, not signed_id", async () => {
     const result = (await executeToolHandler(clientStub(), "fizzy_upload_file", {
-      account_slug: "6117483",
+      account_slug: "123456",
       base64_data: base64("hello"),
       filename: "screenshot.png",
     })) as Record<string, unknown>;
@@ -127,14 +127,14 @@ describe("fizzy_upload_file handler", () => {
 
     await expect(
       executeToolHandler(client, "fizzy_upload_file", {
-        account_slug: "6117483",
+        account_slug: "123456",
         base64_data: base64("x"),
       })
     ).rejects.toThrow(/filename is required/);
 
     await expect(
       executeToolHandler(client, "fizzy_upload_file", {
-        account_slug: "6117483",
+        account_slug: "123456",
         file_path: "a.png",
         base64_data: base64("x"),
         filename: "a.png",
@@ -142,19 +142,19 @@ describe("fizzy_upload_file handler", () => {
     ).rejects.toThrow(/not both/);
 
     await expect(
-      executeToolHandler(client, "fizzy_upload_file", { account_slug: "6117483" })
+      executeToolHandler(client, "fizzy_upload_file", { account_slug: "123456" })
     ).rejects.toThrow(/either file_path .* or base64_data/);
   });
 
   it("passes the decoded bytes and resolved metadata to the client", async () => {
     let seen: { slug: string; file: any } | undefined;
     await executeToolHandler(clientStub((slug, file) => (seen = { slug, file: file as any })), "fizzy_upload_file", {
-      account_slug: "/6117483",
+      account_slug: "/123456",
       base64_data: base64("hello"),
       filename: "screenshot.png",
     });
 
-    expect(seen?.slug).toBe("/6117483");
+    expect(seen?.slug).toBe("/123456");
     expect(new TextDecoder().decode(seen?.file.bytes)).toBe("hello");
     expect(seen?.file.filename).toBe("screenshot.png");
     expect(seen?.file.contentType).toBe("image/png");
@@ -168,7 +168,7 @@ describe("fizzy_upload_file handler", () => {
 
     await expect(
       executeToolHandler(client, "fizzy_upload_file", {
-        account_slug: "6117483",
+        account_slug: "123456",
         file_path: "/etc/passwd",
       })
     ).rejects.toThrow(/only supported on the stdio transport/);
@@ -180,7 +180,7 @@ describe("fizzy_upload_file handler", () => {
     setLocalFileReader(async () => new Uint8Array([1, 2, 3, 4, 5]));
 
     const result = (await executeToolHandler(clientStub(), "fizzy_upload_file", {
-      account_slug: "6117483",
+      account_slug: "123456",
       file_path: "C:/shots/screenshot.png",
     })) as Record<string, unknown>;
 

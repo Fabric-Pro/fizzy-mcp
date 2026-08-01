@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { FizzyClient } from "../../src/client/fizzy-client.js";
 
-const ACCOUNT = "/6117483";
+const ACCOUNT = "/123456";
 const STORAGE_URL = "https://storage.example.com/upload/abc?signature=xyz";
 const ATTACHABLE_SGID = "eyJfcmFpbHMiOnsiZGF0YSI6ImdpZDovL2Zpenp5In19--attachable";
 const BLOB_SIGNED_ID = "eyJfcmFpbHMiOnsiZGF0YSI6IjAzZ2wifX0=--blob-id";
@@ -97,7 +97,7 @@ describe("createDirectUpload", () => {
     expect(calls).toHaveLength(1);
     // The leading slash on the account slug must be normalized away, as elsewhere.
     expect(calls[0].url).toBe(
-      "https://app.fizzy.do/6117483/rails/active_storage/direct_uploads"
+      "https://app.fizzy.do/123456/rails/active_storage/direct_uploads"
     );
     expect(calls[0].method).toBe("POST");
     expect(JSON.parse(calls[0].body as string)).toEqual({

@@ -36,7 +36,12 @@ src/
 │   ├── logger.ts         # Structured stderr logging
 │   ├── security.ts       # CORS, auth, localhost binding
 │   ├── session-manager.ts
-│   └── etag-cache.ts
+│   ├── etag-cache.ts
+│   ├── card-resolver.ts  # card_id → card_number
+│   ├── attachments.ts    # Upload input resolution + ActionText markup
+│   ├── file-source.ts    # Injected local-file capability (stdio only)
+│   ├── md5.ts            # Runtime-independent MD5 (upload checksums)
+│   └── base64.ts         # btoa/atob helpers that also work on Workers
 └── cloudflare/           # Workers deployment (Durable Objects)
 ```
 
@@ -89,6 +94,8 @@ npm run start:http    # Streamable HTTP transport (port 3000)
 - Logging goes to stderr (never stdout — it interferes with stdio transport)
 - `FizzyClient` is passed into handlers via dependency injection, not imported as a global
 - Security: localhost binding by default, origin validation, per-user token isolation for HTTP/SSE transports
+- **Never import `node:fs` (or any filesystem API) into `client/`, `tools/` or `utils/`.** That code is shared with the Cloudflare Worker, which has no filesystem, and with the HTTP/SSE transports, which serve *remote* callers — reading a caller-supplied path there would let a client exfiltrate the server's disk. Local file access is a capability injected at startup via `utils/file-source.ts`, and only `startStdioTransport` in `index.ts` installs it. Leave the default (no reader) alone; it is what keeps every other transport closed
+- Anything reached from `client/`, `tools/` or `utils/` must also run on Workers: no `Buffer`, no `node:crypto`, no reliance on the `nodejs_compat` flag. New files there must be added to `tsconfig.cloudflare.json`'s `include`, or CI's Cloudflare typecheck will not cover them
 - Error classes in `utils/errors.ts` carry status codes and support retry detection
 
 ## Testing
