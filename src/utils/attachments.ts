@@ -123,7 +123,8 @@ export async function resolveAttachment(
       );
     }
     bytes = await readLocalFile(filePath);
-    filename = explicitFilename ?? basename(filePath);
+    // basename either way: an explicit filename is no more trustworthy than a path.
+    filename = basename(explicitFilename ?? filePath);
   } else if (base64Data) {
     if (!explicitFilename) {
       throw new Error("filename is required when uploading with base64_data");

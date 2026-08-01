@@ -110,6 +110,17 @@ describe("resolveAttachment", () => {
       );
     });
 
+    it("strips directory components from an explicit filename too", async () => {
+      setLocalFileReader(async () => new Uint8Array([1]));
+
+      const resolved = await resolveAttachment({
+        file_path: "C:/shots/bug.png",
+        filename: "../../etc/renamed.png",
+      });
+
+      expect(resolved.filename).toBe("renamed.png");
+    });
+
     it("passes the path through to the reader unchanged", async () => {
       const seen: string[] = [];
       setLocalFileReader(async (path) => {
