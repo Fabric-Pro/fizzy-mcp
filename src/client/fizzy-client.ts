@@ -28,6 +28,9 @@ import type {
   UpdateStepRequest,
   CardListOptions,
   CardsPage,
+  DirectUploadBlobRequest,
+  FizzyDirectUpload,
+  FileUpload,
 } from "./types.js";
 import {
   createAPIError,
@@ -39,6 +42,7 @@ import {
 } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import { ETagCache } from "../utils/etag-cache.js";
+import { md5Base64 } from "../utils/md5.js";
 
 export interface FizzyClientConfig {
   accessToken: string;
@@ -1270,5 +1274,107 @@ export class FizzyClient {
       "POST",
       `/${slug}/notifications/bulk_reading`
     );
+  }
+
+  // ============ Attachments (ActionText direct upload) ============
+
+  /**
+   * Step 1: register a blob and get back its signed ids plus where to put the bytes.
+   * @endpoint POST /:account_slug/rails/active_storage/direct_uploads
+   * @see https://github.com/basecamp/fizzy/blob/main/docs/api/sections/rich_text.md
+   */
+  async createDirectUpload(
+    accountSlug: string,
+    blob: DirectUploadBlobRequest
+  ): Promise<FizzyDirectUpload> {
+    const slug = this.normalizeSlug(accountSlug);
+    return this.request<FizzyDirectUpload>(
+      "POST",
+      `/${slug}/rails/active_storage/direct_uploads`,
+      { blob }
+    );
+  }
+
+  /**
+   * Step 2: PUT the bytes to the signed storage URL from step 1.
+   *
+   * Deliberately not routed through `request()`, for two reasons. That path
+   * prefixes `baseUrl`, and this URL is absolute and on a storage host; and it
+   * attaches the Fizzy bearer token, which must never be sent to a third party.
+   * Only the headers step 1 handed back are sent — the URL signature covers
+   * exactly those, and storage rejects any mismatch with an error that does not
+   * mention headers.
+   *
+   * No retry: a failure here is worth surfacing rather than replaying against a
+   * signed URL that may since have expired, which would turn one clear error
+   * into a slower and less obvious one. Callers retry the whole upload, which
+   * mints a fresh URL.
+   */
+  private async putBlobToStorage(
+    url: string,
+    headers: Record<string, string>,
+    bytes: Uint8Array
+  ): Promise<void> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        method: "PUT",
+        headers,
+        body: bytes,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw createAPIError(response.status, response.statusText, errorText);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new FizzyTimeoutError(
+          `Upload timed out after ${this.timeout}ms`,
+          this.timeout
+        );
+      }
+      if (error instanceof TypeError && error.message.includes("fetch")) {
+        throw new FizzyNetworkError(`Network error during upload: ${error.message}`, error);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /**
+   * Run both steps of the ActionText direct-upload flow and return the blob
+   * record.
+   *
+   * To reference the result in a rich-text field, use the record's
+   * `attachable_sgid` — not its `signed_id`. See {@link FizzyDirectUpload}.
+   */
+  async uploadFile(
+    accountSlug: string,
+    file: FileUpload
+  ): Promise<FizzyDirectUpload> {
+    const upload = await this.createDirectUpload(accountSlug, {
+      filename: file.filename,
+      byte_size: file.bytes.length,
+      checksum: md5Base64(file.bytes),
+      content_type: file.contentType,
+    });
+
+    this.log.debug("Direct upload registered", {
+      filename: upload.filename,
+      byteSize: upload.byte_size,
+    });
+
+    await this.putBlobToStorage(
+      upload.direct_upload.url,
+      upload.direct_upload.headers,
+      file.bytes
+    );
+
+    return upload;
   }
 }

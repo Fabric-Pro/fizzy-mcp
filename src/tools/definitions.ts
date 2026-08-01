@@ -670,6 +670,27 @@ export const TOOL_DEFINITIONS = {
       },
     },
   ] as ToolDefinition[],
+
+  // ============ Attachment Tools ============
+  attachments: [
+    {
+      name: "fizzy_upload_file",
+      title: "Upload File",
+      description:
+        "Upload a file (screenshot, image, PDF, log) to Fizzy and get back the HTML needed to embed it. " +
+        "This does not attach the file on its own — it returns an 'attachment_html' snippet that you then " +
+        "include in any rich-text field: pass it in 'body' to fizzy_create_comment or fizzy_update_comment, " +
+        "or in 'description' to fizzy_create_card or fizzy_update_card. Combine it with your own HTML, " +
+        "e.g. body: \"<p>Steps to reproduce:</p>\" + attachment_html. " +
+        "Provide the file as 'file_path' (a local path — stdio transport only) or as 'base64_data' with " +
+        "'filename' (works everywhere).",
+      schema: schemas.uploadFileSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+  ] as ToolDefinition[],
 } as const;
 
 /**

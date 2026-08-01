@@ -17,8 +17,9 @@ describe("Refactored Server Verification", () => {
     expect(() => createFizzyServer(client)).not.toThrow();
   });
 
-  it("should have all 49 tools defined in definitions.ts", () => {
-    expect(ALL_TOOLS).toHaveLength(49);
+  it("should have all 50 tools defined in definitions.ts", () => {
+    expect(ALL_TOOLS).toHaveLength(50);
+    expect(ALL_TOOLS.map((tool) => tool.name)).toContain("fizzy_upload_file");
   });
 
   it("should have all tools with required metadata", () => {

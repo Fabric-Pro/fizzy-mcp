@@ -508,3 +508,49 @@ export const ungildCardSchema = z.object({
   account_slug: accountSlugSchema,
   card_number: cardNumberSchema,
 });
+
+// ============ Attachment schemas ============
+
+// Deliberately a plain object with no .refine(): McpServer.registerTool reads its
+// fields off the schema's shape, and a refined schema is a ZodEffects wrapper with
+// no shape to read — so refining this would publish `properties: {}` to stdio
+// clients and leave the model unable to see any argument. (Two existing tools are
+// refined and already serve empty schemas over stdio for exactly this reason.)
+// The either/or rules below are enforced at runtime by resolveAttachment, which
+// has to own them regardless: the Cloudflare transport dispatches raw arguments
+// without Zod at all.
+export const uploadFileSchema = z
+  .object({
+    account_slug: accountSlugSchema,
+    file_path: z
+      .string()
+      .optional()
+      .describe(
+        "Absolute path to a local file. Provide exactly one of file_path or base64_data. " +
+        "Only available over the stdio transport, where the caller and the server are the " +
+        "same user; hosted transports reject it. Preferred locally — it avoids inlining " +
+        "the file's bytes into the request."
+      ),
+    base64_data: z
+      .string()
+      .optional()
+      .describe(
+        "The file's bytes, Base64-encoded. Provide exactly one of file_path or base64_data. " +
+        "Works on every transport, and requires filename. Use this when file_path is " +
+        "unavailable."
+      ),
+    filename: z
+      .string()
+      .optional()
+      .describe(
+        "Name to store the file under, e.g. 'screenshot.png'. Required with base64_data; " +
+        "defaults to the basename of file_path otherwise."
+      ),
+    content_type: z
+      .string()
+      .optional()
+      .describe(
+        "MIME type, e.g. 'image/png'. Inferred from the filename extension when omitted, " +
+        "falling back to application/octet-stream."
+      ),
+  });
