@@ -23,7 +23,11 @@
     "src/tools/**/*",
     "src/utils/errors.ts",
     "src/utils/etag-cache.ts",
-    "src/utils/logger.ts"
+    "src/utils/logger.ts",
+    "src/utils/attachments.ts",
+    "src/utils/base64.ts",
+    "src/utils/file-source.ts",
+    "src/utils/md5.ts"
   ],
   "exclude": ["node_modules", "dist", "tests"]
 }

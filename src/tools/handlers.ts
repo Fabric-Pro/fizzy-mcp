@@ -11,6 +11,7 @@
 import type { FizzyClient } from "../client/fizzy-client.js";
 import { COLUMN_COLORS, type ColumnColor, type CardListOptions } from "../client/types.js";
 import { resolveCardNumber } from "../utils/card-resolver.js";
+import { attachmentHtml, resolveAttachment } from "../utils/attachments.js";
 
 /**
  * Tool handler result - either data to serialize or a success message
@@ -431,6 +432,25 @@ export const toolHandlers: Record<string, ToolHandler> = {
   fizzy_mark_all_notifications_read: async (client, args) => {
     await client.markAllNotificationsAsRead(args.account_slug as string);
     return "All notifications marked as read";
+  },
+
+  // ============ Attachment Tools ============
+  fizzy_upload_file: async (client, args) => {
+    const file = await resolveAttachment(args);
+    const upload = await client.uploadFile(args.account_slug as string, file);
+
+    return {
+      // attachable_sgid, not signed_id — see FizzyDirectUpload for why they differ.
+      attachable_sgid: upload.attachable_sgid,
+      filename: upload.filename,
+      content_type: upload.content_type,
+      byte_size: upload.byte_size,
+      attachment_html: attachmentHtml(upload.attachable_sgid),
+      next_step:
+        "Include attachment_html verbatim in a rich-text field to attach the file — for " +
+        "example as the 'body' of fizzy_create_comment, or the 'description' of " +
+        "fizzy_update_card. Do not rebuild the tag by hand.",
+    };
   },
 };
 

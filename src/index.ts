@@ -14,9 +14,11 @@
  * - Configure via environment variables: MCP_ALLOWED_ORIGINS, MCP_AUTH_TOKEN
  */
 
+import { readFile } from "node:fs/promises";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { FizzyClient } from "./client/fizzy-client.js";
 import { createFizzyServer } from "./server.js";
+import { setLocalFileReader } from "./utils/file-source.js";
 import { 
   startHTTPTransport as startSecureHTTPTransport,
   startSSETransport as startSecureSSETransport,
@@ -113,6 +115,12 @@ function createClient(): FizzyClient {
 
 // Start stdio transport - for IDE integrations like Cursor, VS Code, Claude Desktop
 async function startStdioTransport(): Promise<void> {
+  // Only stdio may read local files for fizzy_upload_file: here the MCP client is
+  // the same user who owns this process, so reading their disk grants nothing they
+  // could not already do. The HTTP/SSE transports below serve remote callers and
+  // deliberately never install a reader.
+  setLocalFileReader(async (path) => new Uint8Array(await readFile(path)));
+
   const client = createClient();
   const server = createFizzyServer(client);
   const transport = new StdioServerTransport();

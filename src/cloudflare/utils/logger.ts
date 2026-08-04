@@ -275,7 +275,17 @@ export class CloudflareLogger {
     const sanitized: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(args)) {
-      if (sensitiveKeys.some(k => key.toLowerCase().includes(k))) {
+      const lowerKey = key.toLowerCase();
+
+      if (lowerKey === "base64_data") {
+        // The attachment upload's file bytes. Never log any of it — even a
+        // truncated prefix is content, not metadata — but the length is safe
+        // and useful for debugging.
+        sanitized[key] = typeof value === "string" ? `[redacted: ${value.length} chars]` : "[REDACTED]";
+      } else if (lowerKey === "file_path") {
+        // A local filesystem path is sensitive metadata about the caller's machine.
+        sanitized[key] = "[REDACTED]";
+      } else if (sensitiveKeys.some(k => lowerKey.includes(k))) {
         sanitized[key] = "[REDACTED]";
       } else if (typeof value === "string" && value.length > 500) {
         sanitized[key] = value.slice(0, 500) + "...[truncated]";

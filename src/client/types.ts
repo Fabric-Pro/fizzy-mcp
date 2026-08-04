@@ -252,3 +252,49 @@ export interface CardsPage {
   has_more: boolean;          // Link header contained rel="next"
   next_page: number | null;   // page + 1 when has_more, else null
 }
+
+// ActionText direct uploads — POST /:account_slug/rails/active_storage/direct_uploads
+// See https://github.com/basecamp/fizzy/blob/main/docs/api/sections/rich_text.md
+
+// Serialized directly as the `blob` request body, so these names are the API's.
+export interface DirectUploadBlobRequest {
+  filename: string;
+  byte_size: number;
+  /** Base64-encoded MD5 of the file. Hex is rejected, with an error that does not say so. */
+  checksum: string;
+  content_type: string;
+}
+
+export interface FizzyDirectUpload {
+  id: string;
+  key: string;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+  checksum: string;
+  /**
+   * The signed global id that `<action-text-attachment sgid="…">` requires —
+   * purpose "attachable", wrapping `gid://fizzy/ActiveStorage::Blob/…`.
+   *
+   * Not to be confused with `signed_id` below. Fizzy's rich-text documentation
+   * says to use `signed_id` here; doing so is accepted by the API and then
+   * renders as an unresolved-attachment placeholder, because that token is
+   * scoped to purpose "blob_id" instead. This is the field that works.
+   */
+  attachable_sgid: string;
+  /** Purpose "blob_id" — identifies the blob to ActiveStorage, not to ActionText. */
+  signed_id: string;
+  direct_upload: {
+    /** Storage endpoint, on a different host to the API. */
+    url: string;
+    /** Must be echoed back verbatim on the upload PUT — the signature covers them. */
+    headers: Record<string, string>;
+  };
+}
+
+/** A file to upload, already resolved to bytes by the caller. */
+export interface FileUpload {
+  bytes: Uint8Array;
+  filename: string;
+  contentType: string;
+}
