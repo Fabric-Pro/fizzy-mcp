@@ -1,10 +1,11 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   MAX_ATTACHMENT_BYTES,
   attachmentHtml,
   contentTypeForFilename,
   resolveAttachment,
 } from "../../src/utils/attachments.js";
+import { maxEncodedLength } from "../../src/utils/base64.js";
 import { setLocalFileReader } from "../../src/utils/file-source.js";
 
 const base64 = (text: string) => Buffer.from(text, "utf8").toString("base64");
@@ -89,6 +90,24 @@ describe("resolveAttachment", () => {
       expect(
         (await resolveAttachment({ base64_data: base64("x"), filename: "a.txt" })).bytes.length
       ).toBe(1);
+    });
+
+    // The guard has to bound its own cost, not just the decode: optionalString
+    // calls .trim(), which copies the whole string, so an over-cap payload must
+    // be refused before that copy — mirroring the replace-spy assertion in
+    // base64.test.ts for base64ToBytes's own raw-length guard.
+    it("rejects an over-cap base64_data without trimming it first", async () => {
+      const oversized = "A".repeat(maxEncodedLength(MAX_ATTACHMENT_BYTES) + 1);
+      const trimSpy = vi.spyOn(String.prototype, "trim");
+
+      try {
+        await expect(
+          resolveAttachment({ base64_data: oversized, filename: "a.txt" })
+        ).rejects.toThrow(/upload limit/);
+        expect(trimSpy).not.toHaveBeenCalled();
+      } finally {
+        trimSpy.mockRestore();
+      }
     });
   });
 

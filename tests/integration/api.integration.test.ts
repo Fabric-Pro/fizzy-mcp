@@ -465,9 +465,7 @@ describe.skipIf(!shouldRun)("Fizzy API Integration Tests", () => {
         comment.id
       );
 
-      // Rich text comes back as { plain_text, html }, despite the declared type.
-      const body = fetched.body as unknown as { html?: string } | string;
-      const html = typeof body === "string" ? body : body?.html ?? "";
+      const html = fetched.body.html;
 
       expect(html).toContain("action-text-attachment");
       // A <figure> means the server resolved the blob. The placeholder glyph means

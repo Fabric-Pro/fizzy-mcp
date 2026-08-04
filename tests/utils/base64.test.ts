@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { randomBytes } from "node:crypto";
-import { base64ToBytes, bytesToBase64 } from "../../src/utils/base64.js";
+import { base64ToBytes, bytesToBase64, maxEncodedLength } from "../../src/utils/base64.js";
 
 const utf8 = (text: string) => new TextEncoder().encode(text);
 
@@ -81,12 +81,44 @@ describe("base64ToBytes", () => {
       }
     });
 
-    // Whitespace collapses away, so a long-but-mostly-blank payload is small once
-    // decoded. It must not be rejected on raw length alone.
-    it("does not reject a long payload that is mostly whitespace", () => {
-      const padded = " ".repeat(20000) + Buffer.from("hi", "utf8").toString("base64");
+    // Realistic wrapping — a client folding long values at a fixed column — must
+    // still fit comfortably inside the raw cap and decode successfully.
+    it("decodes realistic line-wrapped base64 within the raw cap", () => {
+      const bytes = new Uint8Array(randomBytes(900));
+      const encoded = bytesToBase64(bytes);
+      const wrapped = (encoded.match(/.{1,64}/g) ?? []).join("\r\n");
 
-      expect(new TextDecoder().decode(base64ToBytes(padded, 1000))).toBe("hi");
+      expect(Array.from(base64ToBytes(wrapped, 1000))).toEqual(Array.from(bytes));
+    });
+
+    // Whitespace collapses away, so a payload that is mostly blank decodes to
+    // something tiny — but the raw cap bounds the function's own cost before
+    // that collapse happens, so an input built to be far larger than any
+    // legitimate wrapping must still be rejected, without normalizing it first.
+    it("rejects a payload padded with far more whitespace than real wrapping ever needs, without normalizing it first", () => {
+      const padded = " ".repeat(100000) + Buffer.from("hi", "utf8").toString("base64");
+      const replaceSpy = vi.spyOn(String.prototype, "replace");
+
+      try {
+        expect(() => base64ToBytes(padded, 1000)).toThrow(/upload limit/);
+        expect(replaceSpy).not.toHaveBeenCalled();
+      } finally {
+        replaceSpy.mockRestore();
+      }
+    });
+
+    // '=' is padding, not data, and is skipped by the significant-length count —
+    // but the raw cap still has to catch a flood of it before any scan runs.
+    it("rejects a flood of padding characters on raw length alone", () => {
+      const flooded = "A".repeat(4) + "=".repeat(100000);
+      const replaceSpy = vi.spyOn(String.prototype, "replace");
+
+      try {
+        expect(() => base64ToBytes(flooded, 1000)).toThrow(/upload limit/);
+        expect(replaceSpy).not.toHaveBeenCalled();
+      } finally {
+        replaceSpy.mockRestore();
+      }
     });
 
     it("accepts a padded payload sitting exactly on the limit", () => {
@@ -99,7 +131,10 @@ describe("base64ToBytes", () => {
     });
 
     it("reports the decoded size it computed", () => {
-      expect(() => base64ToBytes("A".repeat(4000), 1000)).toThrow(/decodes to 3000 bytes/);
+      // Chosen to sit inside the raw cap (so the earlier length-only check does
+      // not fire first) while still decoding over the limit, so the precise,
+      // scan-computed size is what ends up in the error.
+      expect(() => base64ToBytes("A".repeat(1400), 1000)).toThrow(/decodes to 1050 bytes/);
     });
 
     it("accepts input exactly at the limit", () => {
@@ -118,5 +153,16 @@ describe("base64ToBytes", () => {
     it("is unbounded when no limit is given", () => {
       expect(base64ToBytes("A".repeat(4000)).length).toBe(3000);
     });
+  });
+});
+
+describe("maxEncodedLength", () => {
+  it("computes the raw-length cap as data chars plus padding and wrapping allowance", () => {
+    // maxBytes=1000 -> dataChars = ceil(1000/3)*4 = 1336; allowance = ceil(1336/16)+64 = 148.
+    expect(maxEncodedLength(1000)).toBe(1484);
+  });
+
+  it("grows with maxBytes", () => {
+    expect(maxEncodedLength(2000)).toBeGreaterThan(maxEncodedLength(1000));
   });
 });

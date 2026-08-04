@@ -526,8 +526,7 @@ export const ungildCardSchema = z.object({
 // Deliberately a plain object with no .refine(): McpServer.registerTool reads its
 // fields off the schema's shape, and a refined schema is a ZodEffects wrapper with
 // no shape to read — so refining this would publish `properties: {}` to stdio
-// clients and leave the model unable to see any argument. (Two existing tools are
-// refined and already serve empty schemas over stdio for exactly this reason.)
+// clients and leave the model unable to see any argument.
 // The either/or rules below are enforced at runtime by resolveAttachment, which
 // has to own them regardless: the Cloudflare transport dispatches raw arguments
 // without Zod at all.

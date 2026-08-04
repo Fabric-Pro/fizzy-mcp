@@ -10,7 +10,7 @@
  * clients as an empty property list. So this is the only place they live.
  */
 
-import { base64ToBytes } from "./base64.js";
+import { base64ToBytes, maxEncodedLength } from "./base64.js";
 import { getLocalFileReader } from "./file-source.js";
 
 /**
@@ -103,6 +103,19 @@ function optionalString(args: Record<string, unknown>, key: string): string | un
 export async function resolveAttachment(
   args: Record<string, unknown>
 ): Promise<ResolvedAttachment> {
+  // Guard on the raw value before optionalString trims it: .trim() copies the
+  // whole string, so an over-cap base64_data must be rejected before that copy,
+  // not after — the same reasoning base64ToBytes applies to its own input.
+  const rawBase64Data = args.base64_data;
+  if (
+    typeof rawBase64Data === "string" &&
+    rawBase64Data.length > maxEncodedLength(MAX_ATTACHMENT_BYTES)
+  ) {
+    throw new Error(
+      `base64_data is over the ${MAX_ATTACHMENT_BYTES}-byte upload limit`
+    );
+  }
+
   const filePath = optionalString(args, "file_path");
   const base64Data = optionalString(args, "base64_data");
   const explicitFilename = optionalString(args, "filename");
