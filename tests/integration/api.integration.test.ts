@@ -280,6 +280,28 @@ describe.skipIf(!shouldRun)("Fizzy API Integration Tests", () => {
       console.log(`✓ Read: Comment verified`);
     });
 
+    // Pins what the API actually sends, which is the evidence the declared type
+    // rests on. It does not guard the type itself: tests sit outside tsconfig's
+    // include and vitest strips annotations without checking them, so reverting
+    // `body` to `string` still passes here. That gap is precisely how the wrong
+    // type survived, and it is why this asserts the runtime shape instead.
+    it("returns comment bodies as rich text, not a string", async () => {
+      const comment = await client!.getComment(
+        testData.accountSlug,
+        testData.createdCardNumber,
+        testData.createdCommentId
+      );
+
+      expect(typeof comment.body).toBe("object");
+      expect(typeof comment.body.html).toBe("string");
+      expect(typeof comment.body.plain_text).toBe("string");
+      // The html carries the markup, which is what made the old `string` type
+      // actively harmful: substring searches for tags silently found nothing.
+      expect(comment.body.html).toContain("<");
+
+      console.log(`✓ Read: body is { plain_text, html }`);
+    });
+
     it("GET /:account_slug/tags - reads tags", async () => {
       const tags = await client!.getTags(testData.accountSlug);
       

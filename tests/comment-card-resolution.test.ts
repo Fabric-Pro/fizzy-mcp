@@ -135,7 +135,9 @@ describe("Comment tool card resolution (integration)", () => {
       number: 42,
       url: "https://app.fizzy.do/123/cards/42",
     });
-    client.getCardComments.mockResolvedValue([{ id: "comment-1", body: "Hello" }]);
+    client.getCardComments.mockResolvedValue([
+      { id: "comment-1", body: { plain_text: "Hello", html: "<div>Hello</div>" } },
+    ]);
 
     const server = createFizzyServer(client as any) as any;
     const handler = server.tools["fizzy_get_card_comments"].handler;
