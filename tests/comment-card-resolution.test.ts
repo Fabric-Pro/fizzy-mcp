@@ -135,7 +135,9 @@ describe("Comment tool card resolution (integration)", () => {
       number: 42,
       url: "https://app.fizzy.do/123/cards/42",
     });
-    client.getCardComments.mockResolvedValue([{ id: "comment-1", body: "Hello" }]);
+    client.getCardComments.mockResolvedValue([
+      { id: "comment-1", body: { plain_text: "Hello", html: "<div>Hello</div>" } },
+    ]);
 
     const server = createFizzyServer(client as any) as any;
     const handler = server.tools["fizzy_get_card_comments"].handler;
@@ -144,5 +146,29 @@ describe("Comment tool card resolution (integration)", () => {
 
     expect(client.getCard).toHaveBeenCalledWith("/123", "card-789");
     expect(client.getCardComments).toHaveBeenCalledWith("/123", "42");
+  });
+
+  // The "one of card_id or card_number" rule used to sit in a Zod .refine(),
+  // which cost these two tools their published parameter lists. The rule now
+  // lives only in resolveCardNumber, so these assert it still bites at the tool
+  // boundary — and on every transport, since the Cloudflare path never ran Zod.
+  it("rejects fizzy_create_comment when neither card_id nor card_number is given", async () => {
+    const server = createFizzyServer(client as any) as any;
+    const handler = server.tools["fizzy_create_comment"].handler;
+
+    await expect(handler({ account_slug: "/123", body: "Test" })).rejects.toThrow(
+      "card_id or card_number is required"
+    );
+    expect(client.createCardComment).not.toHaveBeenCalled();
+  });
+
+  it("rejects fizzy_get_card_comments when neither card_id nor card_number is given", async () => {
+    const server = createFizzyServer(client as any) as any;
+    const handler = server.tools["fizzy_get_card_comments"].handler;
+
+    await expect(handler({ account_slug: "/123" })).rejects.toThrow(
+      "card_id or card_number is required"
+    );
+    expect(client.getCardComments).not.toHaveBeenCalled();
   });
 });

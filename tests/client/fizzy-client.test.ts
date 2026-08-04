@@ -964,7 +964,14 @@ describe("FizzyClient", () => {
   describe("Comments", () => {
     // Expected URL: GET /:account_slug/cards/:card_number/comments
     it("should get card comments", async () => {
-      const mockComments = [{ id: "comment1", body: "Comment 1" }];
+      // The API returns rich text as { plain_text, html }. Mocking it as a bare
+      // string is what let the declared type stay wrong without any test noticing.
+      const mockComments = [
+        {
+          id: "comment1",
+          body: { plain_text: "Comment 1", html: "<div>Comment 1</div>" },
+        },
+      ];
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -982,7 +989,10 @@ describe("FizzyClient", () => {
     });
 
     it("should create a comment", async () => {
-      const mockComment = { id: "comment1", body: "New Comment" };
+      const mockComment = {
+        id: "comment1",
+        body: { plain_text: "New Comment", html: "<div>New Comment</div>" },
+      };
 
       mockFetch.mockResolvedValueOnce({
         ok: true,

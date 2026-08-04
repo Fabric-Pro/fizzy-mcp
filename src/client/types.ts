@@ -62,9 +62,28 @@ export interface FizzyTag {
   url: string;
 }
 
+/**
+ * A rich-text field as the API returns it. Both representations of the same
+ * content: `html` carries the markup, including `<action-text-attachment>`
+ * elements; `plain_text` is the same content flattened.
+ *
+ * Only responses use this shape. Rich text is *written* as a plain HTML string
+ * — see `CreateCommentRequest.body`.
+ *
+ * @see https://github.com/basecamp/fizzy/blob/main/docs/api/sections/comments.md
+ */
+export interface FizzyRichText {
+  plain_text: string;
+  html: string;
+}
+
 export interface FizzyComment {
   id: string;
-  body: string;
+  /**
+   * Rich text, not a string. Reading `.html` or `.plain_text` is required;
+   * treating this as a string yields "[object Object]".
+   */
+  body: FizzyRichText;
   creator: FizzyUser;
   created_at: string;
   updated_at?: string;
