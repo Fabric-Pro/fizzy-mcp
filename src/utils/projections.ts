@@ -127,7 +127,15 @@ export function summarizeCard(card: Obj): Obj {
   }
 
   if (Array.isArray(card.tags)) {
-    out.tags = card.tags.map(toIdTitle).filter((t): t is Obj => t !== undefined);
+    // Card tags arrive as plain title strings, not objects: fizzy's
+    // cards/_card.json.jbuilder serializes them as
+    // `json.tags card.tags.pluck(:title).sort`. Routing those through
+    // toIdTitle mapped every one to undefined, so summary mode reported
+    // every tagged card as untagged. Object-shaped tags are still reduced,
+    // in case the serializer ever grows ids.
+    out.tags = card.tags
+      .map((tag) => (typeof tag === "string" ? tag : toIdTitle(tag)))
+      .filter((t): t is string | Obj => t !== undefined);
   }
 
   const description = card.description;
