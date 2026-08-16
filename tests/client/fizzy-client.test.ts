@@ -1422,6 +1422,25 @@ describe("FizzyClient", () => {
       await expect(client.getBoards("123")).rejects.toThrow(FizzyParseError);
     });
 
+    it("should extract id from Location header on 201 Created with empty body (text() capability path)", async () => {
+      // Regression check for the switch to text()+JSON.parse: an empty body
+      // must still fall through to the 201-Location fallback exactly as it
+      // did when parsing went through response.json().
+      const headers = new Headers();
+      headers.set("Location", "/123/boards/board99.json");
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        headers,
+        text: async () => "",
+      });
+
+      const result = await client.createBoard("123", { name: "New Board" });
+
+      expect(result).toEqual({ id: "board99", url: "/123/boards/board99.json" });
+    });
+
     it("should throw FizzyTimeoutError on timeout", async () => {
       const clientWithShortTimeout = new FizzyClient({
         accessToken: "test-token",
@@ -1684,6 +1703,92 @@ describe("FizzyClient", () => {
       expect(stats?.size).toBe(0);
     });
 
+    it("should invalidate a previously-cached entry when a later response for the same URL has no ETag", async () => {
+      // Regression: cache.set() is only reached when an ETag is present, so
+      // without an explicit invalidation on the no-ETag path, an old cached
+      // entry (and its ETag) would survive a later 200 that stopped sending
+      // one — and every subsequent request would keep sending a now-stale
+      // If-None-Match for a resource that no longer emits ETags at all.
+      const etaggedHeaders = new Headers();
+      etaggedHeaders.set("ETag", '"abc123"');
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: etaggedHeaders,
+        json: async () => [{ id: "board1" }],
+      });
+
+      await client.getBoards("123");
+      expect(client.getCacheStats()?.size).toBe(1);
+
+      // A later response for the same URL carries no ETag.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => [{ id: "board1", name: "changed" }],
+      });
+
+      await client.getBoards("123");
+      expect(client.getCacheStats()?.size).toBe(0);
+
+      // A third request must not carry the old (now-stale) If-None-Match.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => [{ id: "board1", name: "changed again" }],
+      });
+
+      await client.getBoards("123");
+
+      const thirdCall = mockFetch.mock.calls[2];
+      expect(thirdCall[1].headers["If-None-Match"]).toBeUndefined();
+    });
+
+    it("should invalidate a previously-cached entry when a GET for the same URL returns 204 No Content", async () => {
+      // Regression: the 204 branch used to return before reaching the
+      // no-ETag invalidation added above, so a URL that previously had a
+      // cached ETagged representation would keep it (and keep sending its
+      // stale If-None-Match) after a later 204 for the same URL.
+      const etaggedHeaders = new Headers();
+      etaggedHeaders.set("ETag", '"abc123"');
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: etaggedHeaders,
+        json: async () => [{ id: "board1" }],
+      });
+
+      await client.getBoards("123");
+      expect(client.getCacheStats()?.size).toBe(1);
+
+      // A later GET for the same URL returns 204 No Content.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        headers: new Headers(),
+      });
+
+      await client.getBoards("123");
+      expect(client.getCacheStats()?.size).toBe(0);
+
+      // The next request must not carry the old (now-stale) If-None-Match.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => [{ id: "board1" }],
+      });
+
+      await client.getBoards("123");
+
+      const thirdCall = mockFetch.mock.calls[2];
+      expect(thirdCall[1].headers["If-None-Match"]).toBeUndefined();
+    });
+
     it("should not use cache for POST requests", async () => {
       const headers = new Headers();
       headers.set("ETag", '"abc123"');
@@ -1763,6 +1868,86 @@ describe("FizzyClient", () => {
 
       const secondCall = mockFetch.mock.calls[1];
       expect(secondCall[1].headers["If-None-Match"]).toBeUndefined();
+    });
+  });
+
+  describe("Byte-Bounded ETag Caching", () => {
+    // These mocks define `text()` (unlike the `json()`-only mocks used
+    // elsewhere in this file) to exercise the size-measurement path in
+    // `executeRequestWithMeta`. The `json()`-only mocks must keep working
+    // unchanged — that's what the capability check (`typeof response.text
+    // === "function"`) is for.
+    it("should not cache a response whose measured body exceeds cacheMaxEntryBytes", async () => {
+      const boundedClient = new FizzyClient({
+        accessToken: "test-token",
+        baseUrl: "https://app.fizzy.do",
+        maxRetries: 0,
+        cacheMaxEntryBytes: 50,
+      });
+
+      const bigBody = JSON.stringify([{ id: "board1", name: "x".repeat(100) }]);
+      const headers = new Headers();
+      headers.set("ETag", '"big-etag"');
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers,
+        text: async () => bigBody,
+      });
+
+      await boundedClient.getBoards("123");
+
+      // Too large to cache at all.
+      expect(boundedClient.getCacheStats()?.size).toBe(0);
+
+      // A second request must not carry If-None-Match, since nothing was cached.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers,
+        text: async () => bigBody,
+      });
+
+      await boundedClient.getBoards("123");
+
+      const secondCall = mockFetch.mock.calls[1];
+      expect(secondCall[1].headers["If-None-Match"]).toBeUndefined();
+    });
+
+    it("should cache a response whose measured body is within cacheMaxEntryBytes and send If-None-Match on the next request", async () => {
+      const boundedClient = new FizzyClient({
+        accessToken: "test-token",
+        baseUrl: "https://app.fizzy.do",
+        maxRetries: 0,
+        cacheMaxEntryBytes: 50,
+      });
+
+      const smallBody = JSON.stringify([{ id: "board1" }]);
+      const headers = new Headers();
+      headers.set("ETag", '"small-etag"');
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers,
+        text: async () => smallBody,
+      });
+
+      const result1 = await boundedClient.getBoards("123");
+      expect(result1).toEqual([{ id: "board1" }]);
+      expect(boundedClient.getCacheStats()?.size).toBe(1);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 304,
+        headers,
+      });
+
+      await boundedClient.getBoards("123");
+
+      const secondCall = mockFetch.mock.calls[1];
+      expect(secondCall[1].headers["If-None-Match"]).toBe('"small-etag"');
     });
   });
 });
