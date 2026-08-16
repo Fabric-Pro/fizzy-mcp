@@ -57,6 +57,7 @@ describe("tools/list over a real MCP connection", () => {
       "account_slug",
       "card_id",
       "card_number",
+      "fields",
     ]);
   });
 

@@ -62,6 +62,24 @@ export const stepIdSchema = z.string().describe(
   "Step IDs are returned when creating steps or fetching card details."
 );
 
+// Shared `fields` projection schema for the list tools whose full payloads are
+// dominated by fields most callers don't need (long descriptions, duplicated
+// HTML bodies, repeated embedded objects). Referenced by getCardsSchema,
+// getCardCommentsSchema, and getNotificationsSchema.
+export const fieldsSchema = z
+  .enum(["summary", "full"])
+  .optional()
+  .describe(
+    "Response projection. 'full' (the default — used when this parameter is omitted) " +
+    "returns every field exactly as the API provides it, unchanged from prior behavior. " +
+    "'summary' strips large, rarely-needed fields — full HTML/rich-text bodies and " +
+    "descriptions, duplicated plain-text/HTML pairs, and repeated embedded objects like " +
+    "the full creator or card — keeping only IDs, names, and short previews. Summary " +
+    "responses are typically 4x to over 100x smaller depending on the tool. Prefer " +
+    "'summary' when scanning, searching, or listing many results; switch to 'full' (or a " +
+    "single-item fetch tool) once you need complete detail on a specific item."
+  );
+
 // Status schemas with detailed descriptions
 export const cardStatusSchema = z
   .enum(["draft", "published", "archived"])
@@ -164,6 +182,7 @@ export const getCardsSchema = z.object({
     "(early pages are small, e.g. 15 cards; later pages are larger). Omit for the first page; " +
     "pass the next_page value from the previous response to fetch subsequent pages."
   ),
+  fields: fieldsSchema,
 });
 
 
@@ -275,7 +294,9 @@ const commentCardSelectorBase = z.object({
     ),
 });
 
-export const getCardCommentsSchema = commentCardSelectorBase;
+export const getCardCommentsSchema = commentCardSelectorBase.extend({
+  fields: fieldsSchema,
+});
 
 export const createCommentSchema = commentCardSelectorBase.extend({
   body: z.string().describe(
@@ -358,6 +379,7 @@ export const deactivateUserSchema = z.object({
 // Notification schemas
 export const getNotificationsSchema = z.object({
   account_slug: accountSlugSchema,
+  fields: fieldsSchema,
 });
 
 export const markNotificationReadSchema = z.object({
