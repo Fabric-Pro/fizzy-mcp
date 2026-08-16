@@ -38,7 +38,7 @@ This MCP server allows AI assistants like Claude, Cursor, and GitHub Copilot to 
 
 ## Features
 
-- **Full Fizzy API Coverage**: 44 tools covering Boards, Cards, Card Actions, Comments, Reactions, Steps, Columns, Tags, Users, and Notifications
+- **Full Fizzy API Coverage**: 53 tools covering Boards, Cards, Card Actions, Pins, Comments, Reactions, Steps, Columns, Tags, Users, and Notifications
 - **Multiple Transport Protocols**: Stdio (CLI/IDE), HTTP (Streamable), and SSE (deprecated)
 - **Multi-User Support**: HTTP and SSE transports support multiple users with per-user authentication
 - **Flexible Deployment**: Run locally (Node.js) or deploy globally (Cloudflare Workers)
@@ -505,14 +505,13 @@ npx fizzy-mcp --transport http --port 3000
 
 ---
 
-## Available Tools (50 total)
+## Available Tools (53 total)
 
-### Identity & Accounts (3)
+### Identity & Accounts (2)
 | Tool | Description |
 |------|-------------|
 | `fizzy_get_identity` | Get current user's identity and accounts |
 | `fizzy_get_accounts` | List all accessible accounts |
-| `fizzy_get_account` | Get details of a specific account |
 
 ### Boards (5)
 | Tool | Description |
@@ -527,12 +526,13 @@ npx fizzy-mcp --transport http --port 3000
 | Tool | Description |
 |------|-------------|
 | `fizzy_get_cards` | List cards with optional filters (board, indexed_by, column, assignees, tags, search); `fields="summary"` returns a much smaller payload for browsing |
+| `fizzy_get_pins` | List the current user's pinned cards (not paginated, max 100); prefer `fields="summary"` |
 | `fizzy_get_card` | Get card details including description, assignees, tags |
 | `fizzy_create_card` | Create a new card with title, description, status, column, assignees, tags, due date |
 | `fizzy_update_card` | Update any card property |
 | `fizzy_delete_card` | Delete a card |
 
-### Card Actions (9)
+### Card Actions (13)
 | Tool | Description |
 |------|-------------|
 | `fizzy_close_card` | Close a card (mark as done) |
@@ -544,6 +544,10 @@ npx fizzy-mcp --transport http --port 3000
 | `fizzy_toggle_card_assignment` | Toggle a user assignment on/off for a card |
 | `fizzy_watch_card` | Subscribe to notifications for a card |
 | `fizzy_unwatch_card` | Unsubscribe from notifications for a card |
+| `fizzy_gild_card` | Mark a card as golden (team-wide priority); filter with `indexed_by="golden"` |
+| `fizzy_ungild_card` | Remove a card's golden status |
+| `fizzy_pin_card` | Pin a card to the current user's personal quick-access list |
+| `fizzy_unpin_card` | Unpin a card for the current user |
 
 ### Comments (5)
 | Tool | Description |

@@ -242,6 +242,28 @@ export const toolHandlers: Record<string, ToolHandler> = {
     return `Card ${args.card_number} golden status removed`;
   },
 
+  // ============ Pin Tools ============
+  fizzy_pin_card: async (client, args) => {
+    await client.pinCard(args.account_slug as string, args.card_number as string);
+    return `Card ${args.card_number} pinned`;
+  },
+
+  fizzy_unpin_card: async (client, args) => {
+    await client.unpinCard(args.account_slug as string, args.card_number as string);
+    return `Card ${args.card_number} unpinned`;
+  },
+
+  fizzy_get_pins: async (client, args) => {
+    // Parsed before the request so an invalid `fields` value fails fast on the
+    // unvalidated Cloudflare path rather than after spending an API round-trip.
+    const fieldsMode = parseFieldsMode(args.fields);
+    const pins = await client.getPins(args.account_slug as string);
+    if (fieldsMode === "full") return pins;
+    return pins.map((card) =>
+      summarizeCard(card as unknown as Record<string, unknown>)
+    );
+  },
+
   // ============ Comment Tools ============
   fizzy_get_card_comments: async (client, args) => {
     // Validated before resolveCardNumber, which makes its own API round-trip: on the

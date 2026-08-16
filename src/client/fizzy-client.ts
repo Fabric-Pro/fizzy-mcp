@@ -891,6 +891,46 @@ export class FizzyClient {
     await this.request<void>("DELETE", `/${slug}/cards/${cardNumber}/goldness`);
   }
 
+  // ============ Pins ============
+
+  /**
+   * Pin a card for the current user
+   * @endpoint POST /:account_slug/cards/:card_number/pin
+   * @see https://github.com/basecamp/fizzy/blob/main/docs/api/sections/pins.md
+   */
+  async pinCard(accountSlug: string, cardNumber: string): Promise<void> {
+    const slug = this.normalizeSlug(accountSlug);
+    await this.request<void>("POST", `/${slug}/cards/${cardNumber}/pin`);
+  }
+
+  /**
+   * Unpin a card for the current user
+   * @endpoint DELETE /:account_slug/cards/:card_number/pin
+   * @see https://github.com/basecamp/fizzy/blob/main/docs/api/sections/pins.md
+   */
+  async unpinCard(accountSlug: string, cardNumber: string): Promise<void> {
+    const slug = this.normalizeSlug(accountSlug);
+    await this.request<void>("DELETE", `/${slug}/cards/${cardNumber}/pin`);
+  }
+
+  /**
+   * Get the current user's pinned cards for an account.
+   *
+   * Unlike {@link getCards} this endpoint is NOT paginated: the server returns
+   * at most 100 pinned cards in a bare array, so there is no page envelope to
+   * build and nothing to walk. Pins are per-user *and* per-account — the path
+   * is account-scoped despite living under the `/my` namespace, because
+   * My::PinsController (unlike My::IdentitiesController) does not declare
+   * `disallow_account_scope`.
+   * @endpoint GET /:account_slug/my/pins
+   * @see https://github.com/basecamp/fizzy/blob/main/docs/api/sections/pins.md
+   */
+  async getPins(accountSlug: string): Promise<FizzyCard[]> {
+    const slug = this.normalizeSlug(accountSlug);
+    const cards = await this.request<FizzyCard[]>("GET", `/${slug}/my/pins`);
+    return cards ?? [];
+  }
+
   // ============ Comments ============
 
   /**

@@ -148,6 +148,25 @@ export const TOOL_DEFINITIONS = {
       },
     },
     {
+      name: "fizzy_get_pins",
+      title: "List Pinned Cards",
+      description:
+        "Get the cards the current user has pinned in an account, as a plain array of cards. " +
+        "Pins are per-user and per-account, so this returns only the authenticated user's pins — " +
+        "it is not a view of what anyone else pinned. " +
+        "This listing is NOT paginated: the server returns at most 100 pinned cards, and there is " +
+        "no page or next_page to follow. " +
+        "Strongly prefer fields='summary' here — the response carries full card descriptions and " +
+        "HTML by default, so a large pin list can run to several megabytes; summary returns the " +
+        "same cards far smaller. Call fizzy_get_card for the full detail of a specific pin. " +
+        "Use fizzy_pin_card and fizzy_unpin_card to change what appears in this list.",
+      schema: schemas.getPinsSchema,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+      },
+    },
+    {
       name: "fizzy_get_card",
       title: "Get Card Details",
       description:
@@ -329,6 +348,34 @@ export const TOOL_DEFINITIONS = {
         "Remove golden status from a card. The card will no longer appear in golden card filters " +
         "and will lose its priority highlighting.",
       schema: schemas.ungildCardSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    {
+      name: "fizzy_pin_card",
+      title: "Pin Card",
+      description:
+        "Pin a card for the current user, keeping it in their personal quick-access list. " +
+        "Pins are per-user and per-account: pinning affects only the authenticated user's list, " +
+        "not what teammates see. Use this to keep track of a card you need to return to. " +
+        "Retrieve the resulting list with fizzy_get_pins. " +
+        "To flag a card as high-priority for the whole team instead, use fizzy_gild_card.",
+      schema: schemas.pinCardSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    {
+      name: "fizzy_unpin_card",
+      title: "Unpin Card",
+      description:
+        "Unpin a card for the current user, removing it from their personal quick-access list. " +
+        "Only affects the authenticated user's pins; the card itself is unchanged and remains " +
+        "on its board.",
+      schema: schemas.unpinCardSchema,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,

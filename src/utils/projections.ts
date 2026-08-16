@@ -24,7 +24,7 @@ export type FieldsMode = "summary" | "full";
 
 /**
  * Parse the optional `fields` argument shared by fizzy_get_cards,
- * fizzy_get_card_comments, and fizzy_get_notifications.
+ * fizzy_get_card_comments, fizzy_get_notifications, and fizzy_get_pins.
  *
  * This has to exist (not just live in the zod schema) because the Cloudflare
  * transport executes raw args with no zod validation — mirrors the reasoning
