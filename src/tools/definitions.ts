@@ -137,7 +137,10 @@ export const TOOL_DEFINITIONS = {
         "of cards matching the filters (NOT the length of this page). " +
         "To enumerate every match, call repeatedly with page = next_page until has_more is false OR cards comes back " +
         "empty — an out-of-range page returns empty cards but may still report has_more true. " +
-        "A board's cards_count from fizzy_get_boards can exceed a single page of results; that is expected, not a discrepancy.",
+        "A board's cards_count from fizzy_get_boards can exceed a single page of results; that is expected, not a discrepancy. " +
+        "Use fields='summary' when browsing, searching, or scanning many cards — it drops full descriptions/HTML and " +
+        "returns a much smaller payload (often 100x+ smaller). Once you've identified the specific card you need, " +
+        "call fizzy_get_card for its full detail.",
       schema: schemas.getCardsSchema,
       annotations: {
         readOnlyHint: true,
@@ -340,7 +343,9 @@ export const TOOL_DEFINITIONS = {
       title: "List Card Comments",
       description:
         "Get all comments on a card in chronological order. Returns comment text (HTML), authors, timestamps, " +
-        "and reaction counts. Use this to review discussion and feedback on a card.",
+        "and reaction counts. Use this to review discussion and feedback on a card. " +
+        "Use fields='summary' to drop the duplicated HTML body and the repeated per-comment card/creator " +
+        "detail — comment text itself is never truncated in either mode.",
       schema: schemas.getCardCommentsSchema,
       annotations: {
         readOnlyHint: true,
@@ -628,7 +633,9 @@ export const TOOL_DEFINITIONS = {
       title: "List Notifications",
       description:
         "Get all notifications for the current user in an account. Returns notification content, " +
-        "read/unread status, timestamps, and related cards or comments.",
+        "read/unread status, timestamps, and related cards or comments. " +
+        "Use fields='summary' to shrink the embedded card and creator objects down to their key " +
+        "identifying fields — typically several times smaller than the full payload.",
       schema: schemas.getNotificationsSchema,
       annotations: {
         readOnlyHint: true,

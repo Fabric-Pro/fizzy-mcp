@@ -27,7 +27,8 @@
     "src/utils/attachments.ts",
     "src/utils/base64.ts",
     "src/utils/file-source.ts",
-    "src/utils/md5.ts"
+    "src/utils/md5.ts",
+    "src/utils/projections.ts"
   ],
   "exclude": ["node_modules", "dist", "tests"]
 }

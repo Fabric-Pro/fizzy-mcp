@@ -12,6 +12,12 @@ import type { FizzyClient } from "../client/fizzy-client.js";
 import { COLUMN_COLORS, type ColumnColor, type CardListOptions } from "../client/types.js";
 import { resolveCardNumber } from "../utils/card-resolver.js";
 import { attachmentHtml, resolveAttachment } from "../utils/attachments.js";
+import {
+  parseFieldsMode,
+  summarizeCard,
+  summarizeComment,
+  summarizeNotification,
+} from "../utils/projections.js";
 
 /**
  * Tool handler result - either data to serialize or a success message
@@ -111,6 +117,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
         `Card listings always contain published cards; use indexed_by="closed" for closed cards.`
       );
     }
+    const fieldsMode = parseFieldsMode(args.fields);
     const options: CardListOptions = {
       board_ids: args.board_id ? [args.board_id as string] : undefined,
       column_ids: args.column_id ? [args.column_id as string] : undefined,
@@ -120,7 +127,17 @@ export const toolHandlers: Record<string, ToolHandler> = {
       tag_ids: args.tag_ids as string[] | undefined,
       page: parseCardsPage(args.page),
     };
-    return client.getCards(args.account_slug as string, options);
+    const result = await client.getCards(args.account_slug as string, options);
+    if (fieldsMode === "full") return result;
+    return {
+      cards: result.cards.map((card) =>
+        summarizeCard(card as unknown as Record<string, unknown>)
+      ),
+      page: result.page,
+      total_count: result.total_count,
+      has_more: result.has_more,
+      next_page: result.next_page,
+    };
   },
 
   fizzy_get_card: async (client, args) => {
@@ -233,7 +250,12 @@ export const toolHandlers: Record<string, ToolHandler> = {
       args.card_id as string | undefined,
       args.card_number as string | undefined
     );
-    return client.getCardComments(args.account_slug as string, cardNumber);
+    const fieldsMode = parseFieldsMode(args.fields);
+    const comments = await client.getCardComments(args.account_slug as string, cardNumber);
+    if (fieldsMode === "full") return comments;
+    return comments.map((comment) =>
+      summarizeComment(comment as unknown as Record<string, unknown>)
+    );
   },
 
   fizzy_get_comment: async (client, args) => {
@@ -410,7 +432,12 @@ export const toolHandlers: Record<string, ToolHandler> = {
 
   // ============ Notification Tools ============
   fizzy_get_notifications: async (client, args) => {
-    return client.getNotifications(args.account_slug as string);
+    const fieldsMode = parseFieldsMode(args.fields);
+    const notifications = await client.getNotifications(args.account_slug as string);
+    if (fieldsMode === "full") return notifications;
+    return notifications.map((notification) =>
+      summarizeNotification(notification as unknown as Record<string, unknown>)
+    );
   },
 
   fizzy_mark_notification_read: async (client, args) => {

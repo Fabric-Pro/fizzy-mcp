@@ -75,6 +75,7 @@ describe("published tool schemas", () => {
       "account_slug",
       "card_id",
       "card_number",
+      "fields",
     ]);
   });
 

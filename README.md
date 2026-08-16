@@ -526,7 +526,7 @@ npx fizzy-mcp --transport http --port 3000
 ### Cards (6)
 | Tool | Description |
 |------|-------------|
-| `fizzy_get_cards` | List cards with optional filters (board, indexed_by, column, assignees, tags, search) |
+| `fizzy_get_cards` | List cards with optional filters (board, indexed_by, column, assignees, tags, search); `fields="summary"` returns a much smaller payload for browsing |
 | `fizzy_get_card` | Get card details including description, assignees, tags |
 | `fizzy_create_card` | Create a new card with title, description, status, column, assignees, tags, due date |
 | `fizzy_update_card` | Update any card property |
@@ -548,7 +548,7 @@ npx fizzy-mcp --transport http --port 3000
 ### Comments (5)
 | Tool | Description |
 |------|-------------|
-| `fizzy_get_card_comments` | List comments on a card |
+| `fizzy_get_card_comments` | List comments on a card; `fields="summary"` drops the duplicated HTML body and repeated card/creator detail |
 | `fizzy_get_comment` | Get a specific comment |
 | `fizzy_create_comment` | Add a comment to a card (supports HTML) |
 | `fizzy_update_comment` | Update a comment |
@@ -594,7 +594,7 @@ npx fizzy-mcp --transport http --port 3000
 ### Notifications (4)
 | Tool | Description |
 |------|-------------|
-| `fizzy_get_notifications` | List notifications for current user |
+| `fizzy_get_notifications` | List notifications for current user; `fields="summary"` shrinks the embedded card and creator objects |
 | `fizzy_mark_notification_read` | Mark notification as read |
 | `fizzy_mark_notification_unread` | Mark notification as unread |
 | `fizzy_mark_all_notifications_read` | Mark all notifications as read |
