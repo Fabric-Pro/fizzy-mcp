@@ -751,4 +751,47 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
       expect(mockClient.getCards).not.toHaveBeenCalled();
     });
   });
+
+  describe("fields projection is validated before any API call is spent", () => {
+    it("rejects a bogus fields value on fizzy_get_cards without calling the client", async () => {
+      const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          fields: "compact",
+        })
+      ).rejects.toThrow(/fields must be "summary" or "full"/);
+      expect(mockClient.getCards).not.toHaveBeenCalled();
+    });
+
+    it("rejects a bogus fields value on fizzy_get_card_comments before resolving card_id", async () => {
+      // resolveCardNumber spends a getCard round-trip. On the Cloudflare transport,
+      // which runs handlers with unvalidated args, that request would be wasted and a
+      // failure in it would mask the real invalid-argument error.
+      const mockClient = { getCard: vi.fn(), getCardComments: vi.fn() };
+
+      await expect(
+        toolHandlers.fizzy_get_card_comments(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          card_id: "card-abc",
+          fields: "compact",
+        })
+      ).rejects.toThrow(/fields must be "summary" or "full"/);
+      expect(mockClient.getCard).not.toHaveBeenCalled();
+      expect(mockClient.getCardComments).not.toHaveBeenCalled();
+    });
+
+    it("rejects a bogus fields value on fizzy_get_notifications without calling the client", async () => {
+      const mockClient = { getNotifications: vi.fn().mockResolvedValue([]) };
+
+      await expect(
+        toolHandlers.fizzy_get_notifications(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          fields: 7,
+        })
+      ).rejects.toThrow(/fields must be "summary" or "full"/);
+      expect(mockClient.getNotifications).not.toHaveBeenCalled();
+    });
+  });
 });

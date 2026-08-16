@@ -81,7 +81,28 @@ const CARD_SCALAR_KEYS = [
   "postponed",
   "golden",
   "has_attachments",
+  // Kept even though the summary also carries `assignees`: the API truncates that
+  // list and sets this flag, so dropping it would make a partial list read as the
+  // complete set of assignees — exactly the kind of wrong conclusion a triaging
+  // caller would draw from a summary.
+  "has_more_assignees",
 ] as const;
+
+/** Longest `description_preview` emitted by `summarizeCard`, in UTF-16 code units. */
+const DESCRIPTION_PREVIEW_LIMIT = 200;
+
+/**
+ * Truncate to `limit` code units, appending `…`, without splitting a surrogate
+ * pair. Cutting between the two halves of an astral character (an emoji) would
+ * emit a lone surrogate — still valid JSON once escaped, but a malformed
+ * character for whoever renders the preview.
+ */
+function truncatePreview(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const lastUnit = text.charCodeAt(limit - 1);
+  const isHighSurrogate = lastUnit >= 0xd800 && lastUnit <= 0xdbff;
+  return `${text.slice(0, isHighSurrogate ? limit - 1 : limit)}…`;
+}
 
 /**
  * Project a card down to the fields a browsing/searching caller needs.
@@ -111,8 +132,7 @@ export function summarizeCard(card: Obj): Obj {
 
   const description = card.description;
   if (typeof description === "string" && description.length > 0) {
-    out.description_preview =
-      description.length > 200 ? `${description.slice(0, 200)}…` : description;
+    out.description_preview = truncatePreview(description, DESCRIPTION_PREVIEW_LIMIT);
   }
 
   return out;

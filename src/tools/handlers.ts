@@ -244,13 +244,16 @@ export const toolHandlers: Record<string, ToolHandler> = {
 
   // ============ Comment Tools ============
   fizzy_get_card_comments: async (client, args) => {
+    // Validated before resolveCardNumber, which makes its own API round-trip: on the
+    // unvalidated Cloudflare path a bad `fields` value would otherwise spend a request
+    // first, and a failure there would mask the real invalid-argument error.
+    const fieldsMode = parseFieldsMode(args.fields);
     const cardNumber = await resolveCardNumber(
       client,
       args.account_slug as string,
       args.card_id as string | undefined,
       args.card_number as string | undefined
     );
-    const fieldsMode = parseFieldsMode(args.fields);
     const comments = await client.getCardComments(args.account_slug as string, cardNumber);
     if (fieldsMode === "full") return comments;
     return comments.map((comment) =>

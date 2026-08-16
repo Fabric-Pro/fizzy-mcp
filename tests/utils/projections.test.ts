@@ -204,6 +204,28 @@ describe("summarizeCard", () => {
     expect(summary).not.toHaveProperty("description_preview");
   });
 
+  it("never splits a surrogate pair when truncating description_preview", () => {
+    // The emoji straddles the 200-unit boundary: naive slice(0, 200) keeps only its
+    // high surrogate and emits a lone, malformed code unit.
+    const summary = summarizeCard({ ...fullCard, description: `${"A".repeat(199)}😀tail` });
+    const preview = summary.description_preview as string;
+
+    expect(preview).toBe(`${"A".repeat(199)}…`);
+    expect(preview).not.toMatch(/[\uD800-\uDBFF]/);
+    expect([...preview].every((char) => char.codePointAt(0)! <= 0xd7ff || char.codePointAt(0)! >= 0xe000)).toBe(true);
+  });
+
+  it("keeps a surrogate pair that fits entirely within the limit", () => {
+    const summary = summarizeCard({ ...fullCard, description: `${"A".repeat(198)}😀tail` });
+    expect(summary.description_preview).toBe(`${"A".repeat(198)}😀…`);
+  });
+
+  it("keeps has_more_assignees so a truncated assignee list cannot read as complete", () => {
+    const summary = summarizeCard({ ...fullCard, assignees: [{ id: "u1", name: "Bob" }], has_more_assignees: true });
+    expect(summary.has_more_assignees).toBe(true);
+    expect(summary.assignees).toEqual([{ id: "u1", name: "Bob" }]);
+  });
+
   it("carries unmodeled-but-listed fields through: golden, closed, last_active_at, has_attachments", () => {
     const summary = summarizeCard(fullCard);
     expect(summary.golden).toBe(true);
