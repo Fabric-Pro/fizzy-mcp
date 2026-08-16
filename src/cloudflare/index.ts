@@ -27,6 +27,7 @@
 import type { Env, ExecutionContext, SecurityResult, HealthResponse } from "./types.js";
 import { SERVER_VERSION } from "./types.js";
 import { RateLimiter, createLogger, createAnalytics, type LogLevel } from "./utils/index.js";
+import { buildWorkerErrorEnvelope } from "./utils/worker-errors.js";
 
 // Re-export Durable Object classes for Wrangler
 export { McpSessionDO } from "./mcp-session.js";
@@ -249,6 +250,20 @@ async function handleMcp(
     responseHeaders.set("mcp-session-id", sessionId);
   }
 
+  // Residual limitation: `doResponse.body` is streamed through, not buffered.
+  // The try/catch around the top-level `fetch` handler (see the default
+  // export below) only covers the `await handleMcp(...)` call settling —
+  // reading this body happens later and asynchronously, disconnected from
+  // that await, once the platform starts consuming the Response this
+  // function returns. A DO failure *while this body is being consumed
+  // downstream* therefore happens outside that boundary and can still
+  // surface as an uncaught error, no matter what the caller does with the
+  // Response in between. Buffering here with `doResponse.arrayBuffer()`
+  // would make that case catchable too, but at the cost of holding the
+  // *entire* response (e.g. a large `get_cards` page) in the calling
+  // Worker's own memory — which reintroduces the memory pressure this
+  // change exists to relieve. Kept streaming deliberately; this gap is
+  // accepted.
   return new Response(doResponse.body, {
     status: doResponse.status,
     statusText: doResponse.statusText,
@@ -265,87 +280,125 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<Response> {
-    const startTime = Date.now();
-    const url = new URL(request.url);
-    const path = url.pathname;
+    // `path` is computed defensively (outside the try's happy path) so the
+    // catch block below can still report which route failed even if the
+    // failure happened before or during URL parsing.
+    let path = "";
 
-    // Initialize logger
-    const logger = createLogger({
-      level: (env.LOG_LEVEL as LogLevel) || "info",
-      r2Bucket: env.AUDIT_LOGS,
-      consoleOutput: true,
-    });
+    try {
+      const startTime = Date.now();
+      const url = new URL(request.url);
+      path = url.pathname;
 
-    // Initialize analytics
-    const analytics = createAnalytics(env.ANALYTICS);
+      // Initialize logger
+      const logger = createLogger({
+        level: (env.LOG_LEVEL as LogLevel) || "info",
+        r2Bucket: env.AUDIT_LOGS,
+        consoleOutput: true,
+      });
 
-    // Validate Durable Objects binding
-    if (!env.MCP_SESSIONS) {
-      console.error("MCP_SESSIONS Durable Objects binding not configured");
-      return errorResponse(500, "Server configuration error: Missing Durable Objects binding");
-    }
+      // Initialize analytics
+      const analytics = createAnalytics(env.ANALYTICS);
 
-    // Handle health check (skip security for monitoring)
-    if (path === "/health" && request.method === "GET") {
-      const security = validateSecurity(request, env);
-      return handleHealth(security.corsOrigin || "*", env);
-    }
-
-    // Validate security for all other requests
-    const security = validateSecurity(request, env);
-
-    // Handle CORS preflight
-    if (request.method === "OPTIONS") {
-      return handleOptions(security.corsOrigin || "*");
-    }
-
-    // Check security result
-    if (!security.allowed) {
-      analytics.trackRequest(request.method, path, security.statusCode || 403, Date.now() - startTime);
-      return errorResponse(
-        security.statusCode || 403,
-        security.error || "Access denied",
-        security.corsOrigin
-      );
-    }
-
-    // Route to MCP handler (Streamable HTTP transport)
-    if (path === "/mcp") {
-      // Check rate limit if enabled
-      if (env.RATE_LIMITER && env.ENABLE_RATE_LIMIT !== "false") {
-        const fizzyToken = extractFizzyToken(request);
-        if (fizzyToken) {
-          const rateLimiter = new RateLimiter(env.RATE_LIMITER, {
-            limit: parseInt(env.RATE_LIMIT_RPM || "10000", 10),
-            windowSeconds: 60,
-          });
-
-          const rateLimitResult = await rateLimiter.checkByToken(fizzyToken);
-          
-          if (!rateLimitResult.allowed) {
-            logger.warn("Rate limit exceeded", {
-              remaining: rateLimitResult.remaining,
-              resetAt: rateLimitResult.resetAt,
-            });
-            analytics.trackRequest(request.method, path, 429, Date.now() - startTime);
-            return RateLimiter.createRateLimitResponse(rateLimitResult, security.corsOrigin);
-          }
-        }
+      // Validate Durable Objects binding
+      if (!env.MCP_SESSIONS) {
+        console.error("MCP_SESSIONS Durable Objects binding not configured");
+        return errorResponse(500, "Server configuration error: Missing Durable Objects binding");
       }
 
-      const response = await handleMcp(request, env, security.corsOrigin!);
-      
-      // Track request metrics
-      analytics.trackRequest(request.method, path, response.status, Date.now() - startTime);
-      
-      // Flush logs asynchronously
-      ctx.waitUntil(logger.flush());
-      
-      return response;
-    }
+      // Handle health check (skip security for monitoring)
+      if (path === "/health" && request.method === "GET") {
+        const security = validateSecurity(request, env);
+        return handleHealth(security.corsOrigin || "*", env);
+      }
 
-    // 404 for unknown routes
-    analytics.trackRequest(request.method, path, 404, Date.now() - startTime);
-    return errorResponse(404, "Not found", security.corsOrigin);
+      // Validate security for all other requests
+      const security = validateSecurity(request, env);
+
+      // Handle CORS preflight
+      if (request.method === "OPTIONS") {
+        return handleOptions(security.corsOrigin || "*");
+      }
+
+      // Check security result
+      if (!security.allowed) {
+        analytics.trackRequest(request.method, path, security.statusCode || 403, Date.now() - startTime);
+        return errorResponse(
+          security.statusCode || 403,
+          security.error || "Access denied",
+          security.corsOrigin
+        );
+      }
+
+      // Route to MCP handler (Streamable HTTP transport)
+      if (path === "/mcp") {
+        // Check rate limit if enabled
+        if (env.RATE_LIMITER && env.ENABLE_RATE_LIMIT !== "false") {
+          const fizzyToken = extractFizzyToken(request);
+          if (fizzyToken) {
+            const rateLimiter = new RateLimiter(env.RATE_LIMITER, {
+              limit: parseInt(env.RATE_LIMIT_RPM || "10000", 10),
+              windowSeconds: 60,
+            });
+
+            const rateLimitResult = await rateLimiter.checkByToken(fizzyToken);
+
+            if (!rateLimitResult.allowed) {
+              logger.warn("Rate limit exceeded", {
+                remaining: rateLimitResult.remaining,
+                resetAt: rateLimitResult.resetAt,
+              });
+              analytics.trackRequest(request.method, path, 429, Date.now() - startTime);
+              return RateLimiter.createRateLimitResponse(rateLimitResult, security.corsOrigin);
+            }
+          }
+        }
+
+        // `doStub.fetch()` below rejects when Cloudflare kills the session's
+        // Durable Object for exceeding its memory/CPU budget (see the
+        // byte-bounded ETag cache in utils/etag-cache.ts for the main source
+        // of that memory pressure). That rejection — like any exception in
+        // this handler — is caught by the try/catch wrapping this whole
+        // function, which is what keeps it from surfacing as an uncatchable
+        // Cloudflare error 1101 to the client.
+        const response = await handleMcp(request, env, security.corsOrigin!);
+
+        // Track request metrics
+        analytics.trackRequest(request.method, path, response.status, Date.now() - startTime);
+
+        // Flush logs asynchronously
+        ctx.waitUntil(logger.flush());
+
+        return response;
+      }
+
+      // 404 for unknown routes
+      analytics.trackRequest(request.method, path, 404, Date.now() - startTime);
+      return errorResponse(404, "Not found", security.corsOrigin);
+    } catch (error) {
+      // Last-resort error boundary: converts anything that would otherwise
+      // escape this handler uncaught — and surface to the client as an
+      // opaque, misleadingly-"non-retryable" Cloudflare error 1101 — into a
+      // diagnosable JSON-RPC error response instead.
+      console.error("Unhandled error in Worker fetch handler", error);
+
+      // The origin may be unknown at this point (the failure could have
+      // happened before `validateSecurity` ran, or `validateSecurity` itself
+      // could be the thing that threw), so recompute it defensively and
+      // never let this fallback itself throw.
+      let corsOrigin = "*";
+      try {
+        corsOrigin = validateSecurity(request, env).corsOrigin || "*";
+      } catch {
+        corsOrigin = "*";
+      }
+
+      const { status, body } = buildWorkerErrorEnvelope(path, error);
+      const headers = new Headers({ "Content-Type": "application/json" });
+      setCorsHeaders(headers, corsOrigin);
+      setSecurityHeaders(headers);
+
+      return new Response(JSON.stringify(body), { status, headers });
+    }
   },
 };

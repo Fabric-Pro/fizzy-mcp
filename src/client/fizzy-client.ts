@@ -57,6 +57,20 @@ export interface FizzyClientConfig {
   enableCache?: boolean;
   /** Maximum age for cached responses in ms (default: 1 hour) */
   cacheMaxAge?: number;
+  /**
+   * Maximum total size across all cached responses (default: 8388608 / 8MB),
+   * measured as JSON source length in UTF-16 code units — not UTF-8 wire
+   * bytes, and not the retained heap size of the parsed response. Forwarded
+   * to `ETagCache`'s `maxBytes`; see `ETagCacheOptions.maxBytes` for why
+   * that's a deliberately simple sizing proxy rather than a hard memory bound.
+   */
+  cacheMaxBytes?: number;
+  /**
+   * Maximum size for a single cached response; larger responses are not
+   * cached (default: 262144 / 256KB). Same UTF-16-code-unit measurement as
+   * `cacheMaxBytes` — see `ETagCacheOptions.maxEntryBytes`.
+   */
+  cacheMaxEntryBytes?: number;
 }
 
 export class FizzyClient {
@@ -78,7 +92,11 @@ export class FizzyClient {
     
     // Initialize ETag cache if enabled (default: true)
     this.cache = (config.enableCache ?? true)
-      ? new ETagCache({ maxAge: config.cacheMaxAge ?? 60 * 60 * 1000 })
+      ? new ETagCache({
+          maxAge: config.cacheMaxAge ?? 60 * 60 * 1000,
+          maxBytes: config.cacheMaxBytes,
+          maxEntryBytes: config.cacheMaxEntryBytes,
+        })
       : null;
   }
 
@@ -327,17 +345,37 @@ export class FizzyClient {
 
       // Handle 204 No Content
       if (response.status === 204) {
-        // Invalidate related caches on mutations
         if (!isGetRequest && this.cache) {
+          // Invalidate related caches on mutations
           this.invalidateCacheForMutation(url);
+        } else if (isGetRequest && this.cache) {
+          // A GET that comes back 204 carries no ETag either, so any
+          // previously cached representation for this exact URL is now
+          // stale — same reasoning as the no-ETag branch below in the 200
+          // path, just reached via a different response shape.
+          this.cache.invalidate(url);
         }
         return { data: undefined as T, meta: undefined };
       }
 
       // Parse JSON response
       let data: T;
+      // Prefer text() so the cache can bound itself by the JSON source's length
+      // (in UTF-16 code units — a proxy for actual body size, not an exact byte
+      // count; see ETagCacheOptions.maxBytes for why that's an acceptable
+      // trade-off). response.json() materialises the same string internally, so
+      // this costs nothing extra in production. Partial mocks in the test suite
+      // only define json(), hence the capability check — same defensive posture
+      // as the header access in parsePaginationMeta().
+      let rawLength: number | undefined;
       try {
-        data = (await response.json()) as T;
+        if (typeof response.text === "function") {
+          const raw = await response.text();
+          rawLength = raw.length;
+          data = JSON.parse(raw) as T;
+        } else {
+          data = (await response.json()) as T;
+        }
       } catch (parseError) {
         // Handle 201 Created with empty body (Fizzy returns Location header only)
         if (response.status === 201) {
@@ -370,8 +408,15 @@ export class FizzyClient {
       if (isGetRequest && this.cache && response.headers) {
         const etag = response.headers.get("ETag");
         if (etag) {
-          this.cache.set(url, etag, data, meta);
+          this.cache.set(url, etag, data, meta, rawLength);
           this.log.debug(`${logPrefix}Cached response with ETag: ${etag}`);
+        } else {
+          // A successful GET with no ETag can't be cached going forward, but
+          // it can still be *fresher* than whatever's already cached for this
+          // URL. Without this, a prior ETagged entry would survive untouched
+          // and we'd keep sending its (now stale) If-None-Match on every
+          // later request for a resource that no longer emits ETags.
+          this.cache.invalidate(url);
         }
       }
 
