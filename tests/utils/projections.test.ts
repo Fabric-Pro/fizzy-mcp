@@ -250,6 +250,28 @@ describe("summarizeCard", () => {
     expect(summary.tags).toEqual([{ id: "t1", title: "bug" }]);
   });
 
+  // The live API sends card tags as plain title strings —
+  // `json.tags card.tags.pluck(:title).sort` in fizzy's cards/_card.json.jbuilder.
+  // Reducing those as objects silently emptied the list, so a tagged card read as
+  // untagged in summary mode.
+  it("passes through string tags, the shape the API actually sends", () => {
+    const summary = summarizeCard({ ...fullCard, tags: ["programming", "urgent"] });
+    expect(summary.tags).toEqual(["programming", "urgent"]);
+  });
+
+  it("keeps string tags when a card mixes both tag shapes", () => {
+    const summary = summarizeCard({
+      ...fullCard,
+      tags: ["programming", { id: "t1", title: "bug" }],
+    });
+    expect(summary.tags).toEqual(["programming", { id: "t1", title: "bug" }]);
+  });
+
+  it("emits an empty tag list for a card with no tags", () => {
+    const summary = summarizeCard({ ...fullCard, tags: [] });
+    expect(summary.tags).toEqual([]);
+  });
+
   it("does not emit keys absent from the source as undefined", () => {
     const { due_on, ...cardWithoutDueOn } = fullCard;
     const summary = summarizeCard(cardWithoutDueOn);

@@ -35,7 +35,14 @@
  *   POST   /:account_slug/cards/:card_number/assignments - Toggle assignment
  *   POST   /:account_slug/cards/:card_number/watch       - Watch card
  *   DELETE /:account_slug/cards/:card_number/watch       - Unwatch card
- * 
+ *   POST   /:account_slug/cards/:card_number/goldness    - Mark card golden
+ *   DELETE /:account_slug/cards/:card_number/goldness    - Remove golden status
+ *
+ * PINS
+ *   POST   /:account_slug/cards/:card_number/pin  - Pin card for current user
+ *   DELETE /:account_slug/cards/:card_number/pin  - Unpin card for current user
+ *   GET    /:account_slug/my/pins                 - List current user's pinned cards (not paginated, max 100)
+ *
  * COMMENTS
  *   GET    /:account_slug/cards/:card_number/comments              - List comments
  *   GET    /:account_slug/cards/:card_number/comments/:comment_id  - Get comment
@@ -1294,6 +1301,69 @@ describe("FizzyClient", () => {
           method: "POST",
         })
       );
+    });
+  });
+
+  describe("Pins", () => {
+    it("should pin a card", async () => {
+      mockFetch.mockResolvedValueOnce(createMockNoContent());
+
+      await client.pinCard("123", "42");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://app.fizzy.do/123/cards/42/pin",
+        expect.objectContaining({
+          method: "POST",
+        })
+      );
+    });
+
+    it("should unpin a card", async () => {
+      mockFetch.mockResolvedValueOnce(createMockNoContent());
+
+      await client.unpinCard("123", "42");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://app.fizzy.do/123/cards/42/pin",
+        expect.objectContaining({
+          method: "DELETE",
+        })
+      );
+    });
+
+    // The pins index lives under the /my namespace but is still account-scoped,
+    // because My::PinsController does not declare `disallow_account_scope` the
+    // way My::IdentitiesController does. A slug-less "/my/pins" would 404.
+    it("should get pinned cards from the account-scoped /my/pins path", async () => {
+      const mockPins = [
+        { id: "card1", number: 1, title: "First!", status: "published", created_at: "2025-12-05T19:38:48.540Z", url: "https://app.fizzy.do/123/cards/1" },
+      ];
+      mockFetch.mockResolvedValueOnce(createMockResponse(mockPins));
+
+      const result = await client.getPins("123");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://app.fizzy.do/123/my/pins",
+        expect.any(Object)
+      );
+      expect(result).toEqual(mockPins);
+    });
+
+    it("should strip the leading slash from the account slug for pins", async () => {
+      mockFetch.mockResolvedValueOnce(createMockResponse([]));
+
+      await client.getPins("/6117483");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://app.fizzy.do/6117483/my/pins",
+        expect.any(Object)
+      );
+    });
+
+    it("should return an empty array when the pins response has no body", async () => {
+      mockFetch.mockResolvedValueOnce(createMockNoContent());
+
+      await expect(client.getPins("123")).resolves.toEqual([]);
     });
   });
 

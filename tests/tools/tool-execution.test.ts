@@ -752,6 +752,86 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
     });
   });
 
+  describe("Pin handlers", () => {
+    it("fizzy_pin_card forwards slug and card number to the client", async () => {
+      const mockClient = { pinCard: vi.fn().mockResolvedValue(undefined) };
+
+      const result = await toolHandlers.fizzy_pin_card(
+        mockClient as unknown as FizzyClient,
+        { account_slug: "123", card_number: "42" }
+      );
+
+      expect(mockClient.pinCard).toHaveBeenCalledWith("123", "42");
+      expect(result).toBe("Card 42 pinned");
+    });
+
+    it("fizzy_unpin_card forwards slug and card number to the client", async () => {
+      const mockClient = { unpinCard: vi.fn().mockResolvedValue(undefined) };
+
+      const result = await toolHandlers.fizzy_unpin_card(
+        mockClient as unknown as FizzyClient,
+        { account_slug: "123", card_number: "42" }
+      );
+
+      expect(mockClient.unpinCard).toHaveBeenCalledWith("123", "42");
+      expect(result).toBe("Card 42 unpinned");
+    });
+
+    it("fizzy_get_pins returns the client's array unchanged when fields is omitted", async () => {
+      const pins = [{ id: "card1", title: "First!", description: "Hello, World!" }];
+      const mockClient = { getPins: vi.fn().mockResolvedValue(pins) };
+
+      const result = await toolHandlers.fizzy_get_pins(
+        mockClient as unknown as FizzyClient,
+        { account_slug: "123" }
+      );
+
+      expect(mockClient.getPins).toHaveBeenCalledWith("123");
+      expect(result).toEqual(pins);
+    });
+
+    it("fizzy_get_pins projects each card when fields='summary'", async () => {
+      const mockClient = {
+        getPins: vi.fn().mockResolvedValue([
+          {
+            id: "card1",
+            title: "First!",
+            description: "Hello, World!",
+            description_html: "<div>Hello, World!</div>",
+            creator: { id: "u1", name: "David", email_address: "david@example.com" },
+          },
+        ]),
+      };
+
+      const result = (await toolHandlers.fizzy_get_pins(
+        mockClient as unknown as FizzyClient,
+        { account_slug: "123", fields: "summary" }
+      )) as Record<string, unknown>[];
+
+      expect(result).toHaveLength(1);
+      expect(result[0].description).toBeUndefined();
+      expect(result[0].description_html).toBeUndefined();
+      expect(result[0].description_preview).toBe("Hello, World!");
+      expect(result[0].creator).toEqual({ id: "u1", name: "David" });
+    });
+
+    it("fizzy_get_pins handles an empty pin list under both projections", async () => {
+      const mockClient = { getPins: vi.fn().mockResolvedValue([]) };
+
+      await expect(
+        toolHandlers.fizzy_get_pins(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+        })
+      ).resolves.toEqual([]);
+      await expect(
+        toolHandlers.fizzy_get_pins(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          fields: "summary",
+        })
+      ).resolves.toEqual([]);
+    });
+  });
+
   describe("fields projection is validated before any API call is spent", () => {
     it("rejects a bogus fields value on fizzy_get_cards without calling the client", async () => {
       const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
@@ -792,6 +872,18 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
         })
       ).rejects.toThrow(/fields must be "summary" or "full"/);
       expect(mockClient.getNotifications).not.toHaveBeenCalled();
+    });
+
+    it("rejects a bogus fields value on fizzy_get_pins without calling the client", async () => {
+      const mockClient = { getPins: vi.fn().mockResolvedValue([]) };
+
+      await expect(
+        toolHandlers.fizzy_get_pins(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          fields: "compact",
+        })
+      ).rejects.toThrow(/fields must be "summary" or "full"/);
+      expect(mockClient.getPins).not.toHaveBeenCalled();
     });
   });
 });

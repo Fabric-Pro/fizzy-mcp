@@ -65,7 +65,7 @@ export const stepIdSchema = z.string().describe(
 // Shared `fields` projection schema for the list tools whose full payloads are
 // dominated by fields most callers don't need (long descriptions, duplicated
 // HTML bodies, repeated embedded objects). Referenced by getCardsSchema,
-// getCardCommentsSchema, and getNotificationsSchema.
+// getCardCommentsSchema, getNotificationsSchema, and getPinsSchema.
 export const fieldsSchema = z
   .enum(["summary", "full"])
   .optional()
@@ -541,6 +541,25 @@ export const gildCardSchema = z.object({
 export const ungildCardSchema = z.object({
   account_slug: accountSlugSchema,
   card_number: cardNumberSchema,
+});
+
+// ============ Pin schemas ============
+
+export const pinCardSchema = z.object({
+  account_slug: accountSlugSchema,
+  card_number: cardNumberSchema,
+});
+
+export const unpinCardSchema = z.object({
+  account_slug: accountSlugSchema,
+  card_number: cardNumberSchema,
+});
+
+// No `page` field: unlike the card listing, GET /:account_slug/my/pins is not
+// paginated — it returns at most 100 pinned cards in one bare array.
+export const getPinsSchema = z.object({
+  account_slug: accountSlugSchema,
+  fields: fieldsSchema,
 });
 
 // ============ Attachment schemas ============
