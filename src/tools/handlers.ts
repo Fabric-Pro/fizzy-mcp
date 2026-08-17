@@ -366,14 +366,27 @@ export const toolHandlers: Record<string, ToolHandler> = {
       currentAssignees = (existing.assignees ?? []).map((user) => user.id);
     }
 
-    await client.updateCard(accountSlug, cardId, {
+    const cardFields = {
       title: args.title as string,
       description: args.description as string,
       status: args.status as "draft" | "published" | "archived" | undefined,
       column_id: args.column_id as string,
       tag_ids: args.tag_ids as string[],
       due_on: args.due_on as string,
-    });
+    };
+
+    // Only send the card payload when it actually carries something. Upstream's
+    // `params.expect(card: [...])` raises ParameterMissing on an empty hash, so
+    // an assignments-only update would otherwise serialize to `{"card":{}}` and
+    // come back 400 before reaching the assignment calls below.
+    if (Object.values(cardFields).some((value) => value !== undefined)) {
+      await client.updateCard(accountSlug, cardId, cardFields);
+    } else if (!desiredAssignees) {
+      throw new Error(
+        `No changes given for card ${cardId}. Pass at least one of title, description, ` +
+        "status, column_id, tag_ids, due_on or assignee_ids."
+      );
+    }
 
     if (!desiredAssignees) return `Card ${cardId} updated successfully`;
 

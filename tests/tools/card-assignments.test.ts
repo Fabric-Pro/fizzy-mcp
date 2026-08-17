@@ -344,6 +344,26 @@ describe("fizzy_update_card assignments", () => {
     );
   });
 
+  // Upstream's `params.expect(card: [...])` raises ParameterMissing on an empty
+  // hash, so an assignments-only update must not send a card payload at all —
+  // it would serialize to {"card":{}} and 400 before any assignment happens.
+  it("skips the card update entirely when only assignments change", async () => {
+    client.getCard
+      .mockResolvedValueOnce(withAssignees("u1"))
+      .mockResolvedValueOnce(withAssignees("u2"));
+
+    const result = await update({ assignee_ids: ["u2"] });
+
+    expect(client.updateCard).not.toHaveBeenCalled();
+    expect(client.toggleCardAssignment).toHaveBeenCalled();
+    expect(result).toBe("Card 14 updated successfully (assignees: 1 added, 1 removed)");
+  });
+
+  it("rejects an update that carries no changes at all", async () => {
+    await expect(update({})).rejects.toThrow("No changes given for card 14");
+    expect(client.updateCard).not.toHaveBeenCalled();
+  });
+
   // The card payload caps `assignees` at five, so a full replacement computed
   // from it would leave the unreported ones assigned.
   it("refuses to replace assignees when the API reports the list is truncated", async () => {
