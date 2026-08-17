@@ -248,7 +248,6 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
         status: "published",
         column_id: "col1",
         due_on: "2024-12-31",
-        assignee_ids: ["user1", "user2"],
         tag_ids: ["tag1"],
       });
 

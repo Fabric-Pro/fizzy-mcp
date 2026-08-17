@@ -9,7 +9,12 @@
  */
 
 import type { FizzyClient } from "../client/fizzy-client.js";
-import { COLUMN_COLORS, type ColumnColor, type CardListOptions } from "../client/types.js";
+import {
+  COLUMN_COLORS,
+  type ColumnColor,
+  type CardListOptions,
+  type FizzyCard,
+} from "../client/types.js";
 import { resolveCardNumber } from "../utils/card-resolver.js";
 import { attachmentHtml, resolveAttachment } from "../utils/attachments.js";
 import {
@@ -58,6 +63,130 @@ function parseCardsPage(value: unknown): number | undefined {
     if (Number.isSafeInteger(parsed) && parsed >= 1) return parsed;
   }
   throw new Error("page must be a positive integer (1-based), e.g. 2");
+}
+
+/**
+ * Validate the optional `assignee_ids` argument of the card create/update tools.
+ *
+ * Like the guards above, this has to run here because the Cloudflare transport
+ * executes raw args without zod: a non-array value would otherwise reach the
+ * toggle loop and either iterate a string character by character or silently
+ * assign nobody.
+ *
+ * Duplicates are dropped because the upstream endpoint *toggles* assignment —
+ * the same id twice would assign and then immediately unassign the same user.
+ */
+function parseAssigneeIds(value: unknown): string[] | undefined {
+  // Only an omitted value means "leave assignments alone". `null` is rejected
+  // rather than treated as omission, so this matches what zod does on the
+  // validated path instead of quietly ignoring a malformed argument.
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new Error("assignee_ids must be an array of user ID strings");
+  }
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new Error("assignee_ids must contain non-empty user ID strings");
+    }
+  }
+  return [...new Set(value as string[])];
+}
+
+/**
+ * The assignee ids a card payload reports, or `undefined` when it declines to
+ * report them all — `_card.json.jbuilder` renders `card.assignees.limit(5)`, so
+ * a card over that limit only sets `has_more_assignees` and cannot be compared
+ * against a requested set.
+ */
+function assigneeRoster(card: FizzyCard): string[] | undefined {
+  if (card.has_more_assignees) return undefined;
+  return (card.assignees ?? []).map((user) => user.id);
+}
+
+/**
+ * Toggle whatever separates `current` from `desired`, returning the reason each
+ * failed id failed.
+ *
+ * Failures are collected rather than thrown: the card already exists by the time
+ * this runs, so aborting on the first bad user id would leave the caller unable
+ * to tell what happened to the rest.
+ */
+async function applyAssignmentDiff(
+  client: FizzyClient,
+  accountSlug: string,
+  cardNumber: string,
+  desired: string[],
+  current: string[]
+): Promise<Map<string, string>> {
+  const reasons = new Map<string, string>();
+  const toAssign = desired.filter((id) => !current.includes(id));
+  const toUnassign = current.filter((id) => !desired.includes(id));
+
+  for (const userId of [...toAssign, ...toUnassign]) {
+    try {
+      await client.toggleCardAssignment(accountSlug, cardNumber, userId);
+    } catch (error) {
+      reasons.set(userId, error instanceof Error ? error.message : String(error));
+    }
+  }
+  return reasons;
+}
+
+/**
+ * Describe the difference between the roster that was asked for and the one the
+ * card actually came back with.
+ *
+ * The toggles are never taken at their word. The endpoint toggles rather than
+ * sets, and the HTTP client retries every method on ambiguous transport failures
+ * (see the retry loop in `client/fizzy-client.ts`), so a POST that reached Fizzy
+ * but whose response was lost gets sent again and lands on the *opposite* state
+ * while reporting success. A second caller editing the same card between the
+ * read and the writes does the same thing. Neither is preventable from here, so
+ * the result is read back and anything that disagrees is reported.
+ *
+ * `roster` is `undefined` when the end state could not be established, in which
+ * case only failures seen directly are reported — an unverifiable result must
+ * not be dressed up as a confirmed one.
+ */
+function describeAssignmentGaps(
+  desired: string[],
+  roster: string[] | undefined,
+  reasons: Map<string, string>,
+  options: { replacesRoster: boolean }
+): string[] {
+  const because = (userId: string) => {
+    const reason = reasons.get(userId);
+    return reason ? ` (${reason})` : "";
+  };
+
+  if (!roster) {
+    return [...reasons].map(
+      ([userId, reason]) => `Assignment change for user ${userId} failed: ${reason}`
+    );
+  }
+
+  const warnings = desired
+    .filter((userId) => !roster.includes(userId))
+    .map((userId) => `User ${userId} was requested but is not assigned${because(userId)}`);
+
+  if (options.replacesRoster) {
+    warnings.push(
+      ...roster
+        .filter((userId) => !desired.includes(userId))
+        .map((userId) => `User ${userId} is still assigned${because(userId)}`)
+    );
+  }
+  return warnings;
+}
+
+/**
+ * The card number of a freshly created card, which every later assignment call
+ * is addressed by. Taken from the create response rather than a lookup, since
+ * `GET /:slug/cards/:id` itself resolves by number.
+ */
+function createdCardNumber(card: { number?: number; url?: string }): string | undefined {
+  if (card.number !== undefined && card.number !== null) return String(card.number);
+  return card.url?.match(/\/cards\/(\d+)/)?.[1];
 }
 
 /**
@@ -144,29 +273,141 @@ export const toolHandlers: Record<string, ToolHandler> = {
     return client.getCard(args.account_slug as string, args.card_id as string);
   },
 
+  // Assignments are applied *after* the card exists rather than in the create
+  // payload: the upstream controller permits only title/description/image/
+  // created_at/last_active_at, so an `assignee_ids` key in the card body is
+  // dropped by strong params and the card is created unassigned with no error
+  // anywhere in the response (issue #9).
   fizzy_create_card: async (client, args) => {
-    return client.createCard(args.account_slug as string, args.board_id as string, {
+    const accountSlug = args.account_slug as string;
+    const assigneeIds = parseAssigneeIds(args.assignee_ids);
+
+    const card = await client.createCard(accountSlug, args.board_id as string, {
       title: args.title as string,
       description: args.description as string,
       status: args.status as "draft" | "published" | undefined,
       column_id: args.column_id as string,
-      assignee_ids: args.assignee_ids as string[],
       tag_ids: args.tag_ids as string[],
       due_on: args.due_on as string,
     });
+
+    if (!assigneeIds || assigneeIds.length === 0) return card;
+
+    const cardNumber = createdCardNumber(card);
+    if (!cardNumber) {
+      return {
+        ...card,
+        assignment_warnings: [
+          "Card created, but its number could not be read from the response, " +
+          "so no assignments were applied. Use fizzy_toggle_card_assignment to assign users.",
+        ],
+      };
+    }
+
+    // A new card has no assignments at all, so the whole requested set is the
+    // diff — no need to read the roster first.
+    const reasons = await applyAssignmentDiff(client, accountSlug, cardNumber, assigneeIds, []);
+
+    // Re-read the card so `assignees` reflects the assignments just made. The
+    // create response is rendered before any of them exist, and returning it
+    // unchanged is what made the original failure invisible.
+    let assigned: FizzyCard;
+    try {
+      assigned = await client.getCard(accountSlug, cardNumber);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        ...card,
+        assignment_warnings: [
+          ...describeAssignmentGaps(assigneeIds, undefined, reasons, { replacesRoster: false }),
+          `Assignments were applied but the card could not be re-read (${reason}), so ` +
+          "the 'assignees' field above is from before they were made and may be wrong.",
+        ],
+      };
+    }
+
+    const roster = assigneeRoster(assigned);
+    const warnings = describeAssignmentGaps(assigneeIds, roster, reasons, {
+      // Creating a card doesn't claim ownership of anyone else's assignment —
+      // a self-assignment landing alongside this call is not a failure.
+      replacesRoster: false,
+    });
+    if (!roster) {
+      // Over five assignees the API stops listing them, so a requested user that
+      // didn't take can no longer be spotted. Say so rather than let a
+      // warning-free response imply the whole set was confirmed.
+      warnings.unshift(
+        "The card reports more than 5 assignees, so the API no longer lists them all and " +
+        "the requested assignments could not be verified."
+      );
+    }
+    return warnings.length > 0 ? { ...assigned, assignment_warnings: warnings } : assigned;
   },
 
   fizzy_update_card: async (client, args) => {
-    await client.updateCard(args.account_slug as string, args.card_id as string, {
+    const accountSlug = args.account_slug as string;
+    const cardId = args.card_id as string;
+    const desiredAssignees = parseAssigneeIds(args.assignee_ids);
+
+    // `assignee_ids` is documented as a full replacement, and the only way to
+    // honour that against a toggle-based endpoint is to diff it against the
+    // current roster. Read that before mutating anything, so a card we cannot
+    // safely replace assignments on fails before its title changes.
+    let currentAssignees: string[] = [];
+    if (desiredAssignees) {
+      const existing = await client.getCard(accountSlug, cardId);
+      if (existing.has_more_assignees) {
+        throw new Error(
+          `Card ${cardId} has more than 5 assignees, and the API only reports the first 5. ` +
+          "Replacing the assignee list would leave the ones it doesn't report still assigned. " +
+          "Use fizzy_toggle_card_assignment to change this card's assignments individually."
+        );
+      }
+      currentAssignees = (existing.assignees ?? []).map((user) => user.id);
+    }
+
+    await client.updateCard(accountSlug, cardId, {
       title: args.title as string,
       description: args.description as string,
       status: args.status as "draft" | "published" | "archived" | undefined,
       column_id: args.column_id as string,
-      assignee_ids: args.assignee_ids as string[],
       tag_ids: args.tag_ids as string[],
       due_on: args.due_on as string,
     });
-    return `Card ${args.card_id} updated successfully`;
+
+    if (!desiredAssignees) return `Card ${cardId} updated successfully`;
+
+    const reasons = await applyAssignmentDiff(
+      client,
+      accountSlug,
+      cardId,
+      desiredAssignees,
+      currentAssignees
+    );
+
+    // Report the roster the card actually ends up with, not the one the toggles
+    // were supposed to produce — see describeAssignmentGaps for why they differ.
+    // This runs even when the diff was empty: "already correct" is a claim about
+    // the pre-flight snapshot, and the roster can have moved since.
+    let roster: string[] | undefined;
+    let readError: string | undefined;
+    try {
+      roster = assigneeRoster(await client.getCard(accountSlug, cardId));
+    } catch (error) {
+      readError = error instanceof Error ? error.message : String(error);
+    }
+
+    const warnings = describeAssignmentGaps(desiredAssignees, roster, reasons, {
+      replacesRoster: true,
+    });
+    const summary = roster
+      ? `Card ${cardId} updated successfully (assignees: ` +
+        `${roster.filter((id) => !currentAssignees.includes(id)).length} added, ` +
+        `${currentAssignees.filter((id) => !roster.includes(id)).length} removed)`
+      : `Card ${cardId} updated successfully, but the resulting assignee list could not be ` +
+        `verified (${readError ?? "the card now reports more than 5 assignees"})`;
+
+    return warnings.length > 0 ? `${summary}. ${warnings.join("; ")}` : summary;
   },
 
   fizzy_delete_card: async (client, args) => {
