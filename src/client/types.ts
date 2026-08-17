@@ -40,7 +40,14 @@ export interface FizzyCard {
   status: "draft" | "published" | "archived";
   column?: FizzyColumn;
   creator?: FizzyUser;
+  /**
+   * Capped at five entries by the API (`app/views/cards/_card.json.jbuilder`
+   * renders `card.assignees.limit(5)`), so this is not necessarily the full
+   * roster — check `has_more_assignees` before treating it as complete.
+   */
   assignees?: FizzyUser[];
+  /** True when the card has more assignees than the five `assignees` carries. */
+  has_more_assignees?: boolean;
   tags?: FizzyTag[];
   due_on?: string;
   created_at: string;
@@ -123,12 +130,18 @@ export interface FizzyStep {
 }
 
 // Request types
+//
+// `assignee_ids` is deliberately absent from both card request types. Upstream's
+// `CardsController#card_params` permits only
+// `[ :title, :description, :image, :created_at, :last_active_at ]`, so Rails
+// strong params silently drop it and the card comes back unassigned. Assignments
+// are only reachable through `POST /:slug/cards/:number/assignments`, which the
+// card handlers call after the create/update lands.
 export interface CreateCardRequest {
   title: string;
   description?: string;
   status?: "draft" | "published";
   column_id?: string;
-  assignee_ids?: string[];
   tag_ids?: string[];
   due_on?: string;
 }
@@ -138,7 +151,6 @@ export interface UpdateCardRequest {
   description?: string;
   status?: "draft" | "published" | "archived";
   column_id?: string;
-  assignee_ids?: string[];
   tag_ids?: string[];
   due_on?: string;
 }

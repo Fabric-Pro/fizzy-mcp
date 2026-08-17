@@ -214,7 +214,9 @@ export const createCardSchema = z.object({
   ),
   assignee_ids: z.array(z.string()).optional().describe(
     "Array of user IDs to assign to this card. Assigned users receive notifications " +
-    "about card updates and are responsible for the work. Omit for unassigned cards."
+    "about card updates and are responsible for the work. Omit for unassigned cards. " +
+    "Users must be members of the card's board; ids that aren't are reported back in " +
+    "an 'assignment_warnings' field on the created card rather than failing the create."
   ),
   tag_ids: z.array(z.string()).optional().describe(
     "Array of tag IDs to categorize the card. Tags help with organization and filtering. " +
@@ -246,8 +248,12 @@ export const updateCardSchema = z.object({
   ),
   assignee_ids: z.array(z.string()).optional().describe(
     "New array of assignee user IDs. Omit to keep current assignments. " +
-    "⚠️ This replaces all assignees - it's not additive. " +
-    "Note: Use fizzy_toggle_card_assignment for adding/removing individual users."
+    "⚠️ This replaces all assignees - it's not additive. Pass [] to unassign everyone. " +
+    "Cards with more than 5 assignees are rejected, because the API reports only the " +
+    "first 5 and the rest cannot be replaced safely - use fizzy_toggle_card_assignment " +
+    "there, and for adding/removing individual users generally. " +
+    "The resulting assignee list is read back and reported, so check the response: it " +
+    "names any user that did not end up in the state you asked for."
   ),
   tag_ids: z.array(z.string()).optional().describe(
     "New array of tag IDs. Omit to keep current tags. " +
