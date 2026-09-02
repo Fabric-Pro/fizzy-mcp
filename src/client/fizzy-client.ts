@@ -28,6 +28,7 @@ import type {
   UpdateStepRequest,
   CardListOptions,
   CardsPage,
+  NotificationListOptions,
   DirectUploadBlobRequest,
   FizzyDirectUpload,
   FileUpload,
@@ -74,6 +75,19 @@ export interface FizzyClientConfig {
 }
 
 export class FizzyClient {
+  /**
+   * Hard stop for {@link requestAllPages}.
+   *
+   * With upstream's geared page sizes (15, 30, 50, then 100) twenty pages is
+   * 1,795 items — far more than any of the aggregated collections holds in
+   * practice, and small enough to stay well inside the Cloudflare Workers
+   * per-invocation subrequest limit, which a single tool call shares with
+   * everything else it does. The cap exists because upstream keeps advertising
+   * rel="next" past the end of a collection: without it a server that never
+   * stops saying "next" turns one tool call into an unbounded request loop.
+   */
+  private static readonly MAX_AGGREGATED_PAGES = 20;
+
   private accessToken: string;
   private baseUrl: string;
   private timeout: number;
@@ -471,6 +485,58 @@ export class FizzyClient {
   }
 
   /**
+   * Fetch every page of a paginated list endpoint and concatenate them.
+   *
+   * Page 1 is requested with `basePath` untouched — no `page` param — so a
+   * single-page collection produces exactly the request the client made before
+   * pagination was followed at all, and an endpoint that turns out not to be
+   * paginated (no headers) still costs one request.
+   *
+   * Walking stops at the first of: a page with no rel="next" link, an empty
+   * page (upstream advertises a next link past the end of a collection, so the
+   * link alone is not a reliable terminator), or
+   * {@link FizzyClient.MAX_AGGREGATED_PAGES}. Hitting the cap is logged and
+   * returns what was collected rather than throwing: a truncated list is worth
+   * more to the caller than an error, and the warning is what makes the
+   * truncation visible.
+   */
+  private async requestAllPages<T>(basePath: string): Promise<T[]> {
+    const collected: T[] = [];
+
+    for (let page = 1; ; page++) {
+      const path =
+        page === 1
+          ? basePath
+          : `${basePath}${basePath.includes("?") ? "&" : "?"}page=${page}`;
+
+      const { data, meta } = await this.requestWithMeta<T[]>(
+        "GET",
+        path,
+        undefined,
+        (response) => this.parsePaginationMeta(response)
+      );
+
+      const items = Array.isArray(data) ? data : [];
+      for (const item of items) collected.push(item);
+
+      // No metadata at all means the response carried no pagination headers,
+      // which is the same signal `getCards` treats as "there is no page 2".
+      const pagination = meta as
+        | { totalCount: number | null; hasMore: boolean }
+        | undefined;
+      if (!pagination?.hasMore || items.length === 0) return collected;
+
+      if (page >= FizzyClient.MAX_AGGREGATED_PAGES) {
+        this.log.warn(
+          `Stopped at the ${FizzyClient.MAX_AGGREGATED_PAGES}-page cap for ${basePath}; ` +
+            `returning ${collected.length} items, which may be incomplete`
+        );
+        return collected;
+      }
+    }
+  }
+
+  /**
    * Read geared_pagination metadata off a list response.
    *
    * Returns undefined when neither header is present, which is the signal the
@@ -592,13 +658,16 @@ export class FizzyClient {
   // ============ Boards ============
 
   /**
-   * Get all boards in an account
+   * Get all boards in an account.
+   *
+   * The endpoint is paginated upstream, so every page is fetched and
+   * concatenated — the result is the complete list, not the first page.
    * @endpoint GET /:account_slug/boards
    * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#get-account_slugboards
    */
   async getBoards(accountSlug: string): Promise<FizzyBoard[]> {
     const slug = this.normalizeSlug(accountSlug);
-    return this.request<FizzyBoard[]>("GET", `/${slug}/boards`);
+    return this.requestAllPages<FizzyBoard>(`/${slug}/boards`);
   }
 
   /**
@@ -934,7 +1003,11 @@ export class FizzyClient {
   // ============ Comments ============
 
   /**
-   * Get all comments on a card
+   * Get all comments on a card.
+   *
+   * The endpoint is paginated upstream, so every page is fetched and
+   * concatenated — the result is the complete thread in chronological order,
+   * not the first page of it.
    * @endpoint GET /:account_slug/cards/:card_number/comments
    * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#get-account_slugcardscard_numbercomments
    */
@@ -943,8 +1016,7 @@ export class FizzyClient {
     cardNumber: string
   ): Promise<FizzyComment[]> {
     const slug = this.normalizeSlug(accountSlug);
-    return this.request<FizzyComment[]>(
-      "GET",
+    return this.requestAllPages<FizzyComment>(
       `/${slug}/cards/${cardNumber}/comments`
     );
   }
@@ -1241,13 +1313,16 @@ export class FizzyClient {
   // ============ Tags ============
 
   /**
-   * Get all tags in an account
+   * Get all tags in an account.
+   *
+   * The endpoint is paginated upstream, so every page is fetched and
+   * concatenated — the result is the complete list, not the first page.
    * @endpoint GET /:account_slug/tags
    * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#get-account_slugtags
    */
   async getTags(accountSlug: string): Promise<FizzyTag[]> {
     const slug = this.normalizeSlug(accountSlug);
-    return this.request<FizzyTag[]>("GET", `/${slug}/tags`);
+    return this.requestAllPages<FizzyTag>(`/${slug}/tags`);
   }
 
   // Note: POST/DELETE /:account_slug/tags endpoints return 404
@@ -1256,13 +1331,16 @@ export class FizzyClient {
   // ============ Users ============
 
   /**
-   * Get all active users in an account
+   * Get all active users in an account.
+   *
+   * The endpoint is paginated upstream, so every page is fetched and
+   * concatenated — the result is the complete roster, not the first page.
    * @endpoint GET /:account_slug/users
    * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#get-account_slugusers
    */
   async getUsers(accountSlug: string): Promise<FizzyUser[]> {
     const slug = this.normalizeSlug(accountSlug);
-    return this.request<FizzyUser[]>("GET", `/${slug}/users`);
+    return this.requestAllPages<FizzyUser>(`/${slug}/users`);
   }
 
   /**
@@ -1304,16 +1382,43 @@ export class FizzyClient {
   // ============ Notifications ============
 
   /**
-   * Get all notifications for the current user
+   * Get one page of notifications for the current user.
+   *
+   * Deliberately NOT aggregated like the other lists, because this endpoint's
+   * pages are not slices of one collection. `NotificationsController#index`
+   * renders `(@unread || []) + @page.records`, and only populates `@unread`
+   * (up to 100 unread notifications) when the request carries no `page` param.
+   * So the page-less request returns unread items followed by the most recent
+   * read ones, while any `?page=N` returns read notifications only. Read
+   * notifications accumulate for the life of the account, which is why walking
+   * every page here would be both unbounded and wrong.
+   *
+   * Omitting `page` — or passing 1 — issues the page-less request, exactly as
+   * before. Pages 2 and up walk backwards through already-read history.
    * @endpoint GET /:account_slug/notifications
    * @see https://github.com/basecamp/fizzy/blob/main/docs/API.md#get-account_slugnotifications
    */
-  async getNotifications(accountSlug: string): Promise<FizzyNotification[]> {
+  async getNotifications(
+    accountSlug: string,
+    options?: NotificationListOptions
+  ): Promise<FizzyNotification[]> {
     const slug = this.normalizeSlug(accountSlug);
-    return this.request<FizzyNotification[]>(
-      "GET",
-      `/${slug}/notifications`
-    );
+    const requestedPage = options?.page ?? 1;
+
+    // The tool layer validates `page` separately; this defends direct client
+    // callers, the same way getCards does.
+    if (!Number.isSafeInteger(requestedPage) || requestedPage < 1) {
+      throw new Error("page must be a positive integer (1-based)");
+    }
+
+    // Page 1 must stay page-less: `?page=1` is not the same request upstream,
+    // it drops every unread notification from the response.
+    const path =
+      requestedPage === 1
+        ? `/${slug}/notifications`
+        : `/${slug}/notifications?page=${requestedPage}`;
+
+    return this.request<FizzyNotification[]>("GET", path);
   }
 
   /**

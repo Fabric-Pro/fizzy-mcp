@@ -255,6 +255,10 @@ export type CardFilterOptions = {
 // pagination param (1-based), not a filter.
 export type CardListOptions = CardFilterOptions & { page?: number };
 
+// Options accepted by getNotifications. `page` is the upstream pagination param;
+// see getNotifications for why this endpoint exposes one instead of aggregating.
+export type NotificationListOptions = { page?: number };
+
 // One page of GET /:account_slug/cards. The endpoint is paginated upstream
 // (geared_pagination in offset mode) with a server-controlled, variable page size.
 export interface CardsPage {

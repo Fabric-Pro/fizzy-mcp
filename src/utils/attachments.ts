@@ -4,7 +4,7 @@
  *
  * Validation lives here rather than in the Zod schema, for two reasons: the
  * Cloudflare transport executes raw arguments without Zod at all — the same
- * reason `parseCardsPage` in tools/handlers.ts validates by hand — and the
+ * reason `parsePage` in tools/handlers.ts validates by hand — and the
  * either/or rules cannot be expressed as Zod refinements without turning the
  * schema into a ZodEffects, which `McpServer.registerTool` publishes to stdio
  * clients as an empty property list. So this is the only place they live.

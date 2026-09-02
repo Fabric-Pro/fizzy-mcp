@@ -516,7 +516,7 @@ npx fizzy-mcp --transport http --port 3000
 ### Boards (5)
 | Tool | Description |
 |------|-------------|
-| `fizzy_get_boards` | List all boards in an account |
+| `fizzy_get_boards` | List all boards in an account (complete list; every upstream page is fetched server-side) |
 | `fizzy_get_board` | Get details of a specific board |
 | `fizzy_create_board` | Create a new board |
 | `fizzy_update_board` | Update a board's name |
@@ -552,7 +552,7 @@ npx fizzy-mcp --transport http --port 3000
 ### Comments (5)
 | Tool | Description |
 |------|-------------|
-| `fizzy_get_card_comments` | List comments on a card; `fields="summary"` drops the duplicated HTML body and repeated card/creator detail |
+| `fizzy_get_card_comments` | List comments on a card (complete thread; every upstream page is fetched server-side); `fields="summary"` drops the duplicated HTML body and repeated card/creator detail |
 | `fizzy_get_comment` | Get a specific comment |
 | `fizzy_create_comment` | Add a comment to a card (supports HTML) |
 | `fizzy_update_comment` | Update a comment |
@@ -585,12 +585,12 @@ npx fizzy-mcp --transport http --port 3000
 ### Tags (1)
 | Tool | Description |
 |------|-------------|
-| `fizzy_get_tags` | List all tags in an account |
+| `fizzy_get_tags` | List all tags in an account (complete list; every upstream page is fetched server-side) |
 
 ### Users (4)
 | Tool | Description |
 |------|-------------|
-| `fizzy_get_users` | List users in an account |
+| `fizzy_get_users` | List users in an account (complete roster; every upstream page is fetched server-side) |
 | `fizzy_get_user` | Get user details |
 | `fizzy_update_user` | Update user's display name |
 | `fizzy_deactivate_user` | Deactivate a user |
@@ -598,7 +598,7 @@ npx fizzy-mcp --transport http --port 3000
 ### Notifications (4)
 | Tool | Description |
 |------|-------------|
-| `fizzy_get_notifications` | List notifications for current user; `fields="summary"` shrinks the embedded card and creator objects |
+| `fizzy_get_notifications` | List notifications for current user: default returns up to 100 unread plus the latest page of read ones, `page=2,3,...` walks older read-only history; `fields="summary"` shrinks the embedded card and creator objects |
 | `fizzy_mark_notification_read` | Mark notification as read |
 | `fizzy_mark_notification_unread` | Mark notification as unread |
 | `fizzy_mark_all_notifications_read` | Mark all notifications as read |

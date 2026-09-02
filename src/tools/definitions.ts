@@ -65,7 +65,9 @@ export const TOOL_DEFINITIONS = {
       title: "List Boards",
       description:
         "Get all boards in a Fizzy account. Returns board details including IDs, names, descriptions, and URLs. " +
-        "Use this to discover available boards before working with cards.",
+        "Use this to discover available boards before working with cards. " +
+        "The result is the complete list: every upstream page is fetched server-side, so there is no page " +
+        "parameter and nothing further to request.",
       schema: schemas.getBoardsSchema,
       annotations: {
         readOnlyHint: true,
@@ -391,6 +393,8 @@ export const TOOL_DEFINITIONS = {
       description:
         "Get all comments on a card in chronological order. Returns comment text (HTML), authors, timestamps, " +
         "and reaction counts. Use this to review discussion and feedback on a card. " +
+        "The result is the complete thread: every upstream page is fetched server-side, so there is no page " +
+        "parameter and nothing further to request. " +
         "Use fields='summary' to drop the duplicated HTML body and the repeated per-comment card/creator " +
         "detail — comment text itself is never truncated in either mode.",
       schema: schemas.getCardCommentsSchema,
@@ -613,7 +617,9 @@ export const TOOL_DEFINITIONS = {
       title: "List Tags",
       description:
         "Get all tags used in an account. Tags are labels for categorizing and organizing cards. " +
-        "Returns tag IDs, titles, and usage counts across cards.",
+        "Returns tag IDs, titles, and usage counts across cards. " +
+        "The result is the complete list: every upstream page is fetched server-side, so there is no page " +
+        "parameter and nothing further to request.",
       schema: schemas.getTagsSchema,
       annotations: {
         readOnlyHint: true,
@@ -629,7 +635,9 @@ export const TOOL_DEFINITIONS = {
       title: "List Users",
       description:
         "Get all active users in an account. Returns user IDs, names, emails, and access levels. " +
-        "Use this to discover available users for card assignments.",
+        "Use this to discover available users for card assignments. " +
+        "The result is the complete roster: every upstream page is fetched server-side, so there is no page " +
+        "parameter and nothing further to request.",
       schema: schemas.getUsersSchema,
       annotations: {
         readOnlyHint: true,
@@ -679,8 +687,14 @@ export const TOOL_DEFINITIONS = {
       name: "fizzy_get_notifications",
       title: "List Notifications",
       description:
-        "Get all notifications for the current user in an account. Returns notification content, " +
+        "Get notifications for the current user in an account. Returns notification content, " +
         "read/unread status, timestamps, and related cards or comments. " +
+        "By default (page omitted) returns up to 100 unread notifications followed by the most recent page " +
+        "of already-read ones — this is what you want for 'what needs my attention'. " +
+        "Pages 2 and up contain ONLY older, already-read notifications; no unread notification ever appears " +
+        "there. To walk back through history, call with page=2, then 3, and so on until the array comes back " +
+        "empty. Page size is server-controlled and variable, so never derive counts or remaining history from " +
+        "the length of a page. " +
         "Use fields='summary' to shrink the embedded card and creator objects down to their key " +
         "identifying fields — typically several times smaller than the full payload.",
       schema: schemas.getNotificationsSchema,
