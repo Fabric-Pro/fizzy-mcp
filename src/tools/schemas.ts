@@ -385,6 +385,17 @@ export const deactivateUserSchema = z.object({
 // Notification schemas
 export const getNotificationsSchema = z.object({
   account_slug: accountSlugSchema,
+  // Same .min(1) reasoning as getCardsSchema.page: .positive() is an exclusive
+  // bound, which zod-to-json-schema renders as draft-04 `exclusiveMinimum: true`
+  // and makes the whole tool list unusable for strict clients.
+  page: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional().describe(
+    "Page of already-read notification history to fetch (1-based). Omit (or pass 1) for the " +
+    "default response: up to 100 unread notifications followed by the most recent page of read " +
+    "ones. Pages 2 and up contain ONLY older, already-read notifications - no unread ones ever " +
+    "appear there. Page size is server-controlled and variable, so never infer counts or how " +
+    "much history is left from how many items a page returns; walk with page=2, 3, ... until " +
+    "the array comes back empty."
+  ),
   fields: fieldsSchema,
 });
 

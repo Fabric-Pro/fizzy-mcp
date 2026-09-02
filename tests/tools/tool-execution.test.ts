@@ -873,6 +873,56 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
       expect(mockClient.getNotifications).not.toHaveBeenCalled();
     });
 
+    it("passes a notifications page through to the client", async () => {
+      const mockClient = { getNotifications: vi.fn().mockResolvedValue([]) };
+
+      await toolHandlers.fizzy_get_notifications(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+        page: 3,
+      });
+
+      expect(mockClient.getNotifications.mock.calls[0][1]).toEqual({ page: 3 });
+    });
+
+    it("calls the client with no options at all when page is not given", async () => {
+      // The page-less call is the pre-existing one and the only one that returns
+      // unread items, so an omitted page must not turn into an options object.
+      const mockClient = { getNotifications: vi.fn().mockResolvedValue([]) };
+
+      await toolHandlers.fizzy_get_notifications(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+      });
+
+      expect(mockClient.getNotifications).toHaveBeenCalledTimes(1);
+      expect(mockClient.getNotifications.mock.calls[0]).toEqual(["123"]);
+    });
+
+    it("coerces a digit-string notifications page", async () => {
+      const mockClient = { getNotifications: vi.fn().mockResolvedValue([]) };
+
+      await toolHandlers.fizzy_get_notifications(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+        page: "2",
+      });
+
+      expect(mockClient.getNotifications.mock.calls[0][1]).toEqual({ page: 2 });
+    });
+
+    it.each([0, -1, 1.5, "abc"])(
+      "rejects notifications page %p without calling the client",
+      async (page) => {
+        const mockClient = { getNotifications: vi.fn().mockResolvedValue([]) };
+
+        await expect(
+          toolHandlers.fizzy_get_notifications(mockClient as unknown as FizzyClient, {
+            account_slug: "123",
+            page,
+          })
+        ).rejects.toThrow("page must be a positive integer (1-based), e.g. 2");
+        expect(mockClient.getNotifications).not.toHaveBeenCalled();
+      }
+    );
+
     it("rejects a bogus fields value on fizzy_get_pins without calling the client", async () => {
       const mockClient = { getPins: vi.fn().mockResolvedValue([]) };
 

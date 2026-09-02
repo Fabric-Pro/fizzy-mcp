@@ -87,6 +87,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FizzyClient } from "../../src/client/fizzy-client.js";
+import { logger, type LogLevel } from "../../src/utils/logger.js";
 import {
   FizzyAuthError,
   FizzyNotFoundError,
@@ -958,6 +959,304 @@ describe("FizzyClient", () => {
         next_page: 2,
       });
     });
+  });
+
+  /**
+   * List aggregation
+   *
+   * GET /:slug/boards, /:slug/tags, /:slug/users and
+   * /:slug/cards/:number/comments are all paginated upstream with the same
+   * geared_pagination gearing as cards (15, 30, 50, then 100 per page), but
+   * they return bare arrays with no page envelope, so callers had no way to ask
+   * for page 2 and no way to tell they had only been given page 1. These
+   * methods now walk the Link header until it stops advertising rel="next".
+   */
+  describe("List aggregation across pages", () => {
+    const pageResponse = (
+      items: unknown[],
+      headerValues: Record<string, string> = {}
+    ) => {
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(headerValues)) {
+        headers.set(name, value);
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers,
+        json: async () => items,
+      };
+    };
+
+    const nextLink = (page: number) => ({
+      Link: `<https://app.fizzy.do/123/boards?page=${page}>; rel="next"`,
+    });
+
+    it("follows rel=next across pages and concatenates them in order", async () => {
+      mockFetch
+        .mockResolvedValueOnce(pageResponse([{ id: "b1" }, { id: "b2" }], nextLink(2)))
+        .mockResolvedValueOnce(pageResponse([{ id: "b3" }], nextLink(3)))
+        .mockResolvedValueOnce(pageResponse([{ id: "b4" }]));
+
+      const result = await client.getBoards("123");
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(result).toEqual([{ id: "b1" }, { id: "b2" }, { id: "b3" }, { id: "b4" }]);
+    });
+
+    it("requests page 1 with no page param and later pages with one", async () => {
+      mockFetch
+        .mockResolvedValueOnce(pageResponse([{ id: "b1" }], nextLink(2)))
+        .mockResolvedValueOnce(pageResponse([{ id: "b2" }], nextLink(3)))
+        .mockResolvedValueOnce(pageResponse([{ id: "b3" }]));
+
+      await client.getBoards("123");
+
+      expect(mockFetch.mock.calls[0][0]).toBe("https://app.fizzy.do/123/boards");
+      expect(mockFetch.mock.calls[1][0]).toBe("https://app.fizzy.do/123/boards?page=2");
+      expect(mockFetch.mock.calls[2][0]).toBe("https://app.fizzy.do/123/boards?page=3");
+    });
+
+    it("stops after a page whose Link header has no rel=next", async () => {
+      mockFetch.mockResolvedValueOnce(
+        pageResponse([{ id: "b1" }], {
+          Link: '<https://app.fizzy.do/123/boards?page=1>; rel="prev"',
+          "X-Total-Count": "1",
+        })
+      );
+
+      const result = await client.getBoards("123");
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(result).toEqual([{ id: "b1" }]);
+    });
+
+    it("stops on an empty page even when the Link header still advertises a next one", async () => {
+      // Upstream keeps emitting rel="next" past the end of the collection, so
+      // the empty page is the only reliable terminator on that path.
+      mockFetch
+        .mockResolvedValueOnce(pageResponse([{ id: "b1" }], nextLink(2)))
+        .mockResolvedValueOnce(pageResponse([], nextLink(3)));
+
+      const result = await client.getBoards("123");
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(result).toEqual([{ id: "b1" }]);
+    });
+
+    it("makes a single request when the response carries no pagination headers", async () => {
+      // Absent metadata has to mean "one page", which is what keeps every
+      // pre-existing single-response test (and mock) behaving as before.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [{ id: "b1" }],
+      });
+
+      const result = await client.getBoards("123");
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(result).toEqual([{ id: "b1" }]);
+    });
+
+    it("stops at the page cap and warns instead of walking forever", async () => {
+      // A next link on every page (which is what a server bug, or a collection
+      // growing faster than we read it, looks like) must not turn one tool call
+      // into unbounded subrequests - Cloudflare Workers cap those per invocation.
+      for (let page = 1; page <= 40; page++) {
+        mockFetch.mockResolvedValueOnce(
+          pageResponse([{ id: `b${page}` }], nextLink(page + 1))
+        );
+      }
+
+      const previousLevel = (process.env.LOG_LEVEL as LogLevel) || "info";
+      logger.setLevel("warn");
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      let result: unknown[];
+      let warnings: string[];
+      try {
+        // The child logger copies the level at construction time.
+        const cappedClient = new FizzyClient({
+          accessToken: "test-token",
+          baseUrl: "https://app.fizzy.do",
+          maxRetries: 0,
+        });
+        result = await cappedClient.getBoards("123");
+      } finally {
+        // Read the calls before restoring: mockRestore() discards them.
+        warnings = consoleErrorSpy.mock.calls.map((call) => String(call[0]));
+        consoleErrorSpy.mockRestore();
+        logger.setLevel(previousLevel);
+      }
+
+      expect(mockFetch).toHaveBeenCalledTimes(20);
+      expect(result!).toHaveLength(20);
+      expect(warnings!.some((line) => line.includes("page cap"))).toBe(true);
+    });
+
+    it("appends page to a path that already carries a query string", async () => {
+      // None of the aggregated endpoints takes filters today, so this exercises
+      // the helper directly: the separator has to already be right for the first
+      // one that does, and a "?page=2" glued onto an existing query silently
+      // returns page 1 forever.
+      const walk = (
+        client as unknown as {
+          requestAllPages: (path: string) => Promise<unknown[]>;
+        }
+      ).requestAllPages.bind(client);
+
+      mockFetch
+        .mockResolvedValueOnce(pageResponse([{ id: "t1" }], nextLink(2)))
+        .mockResolvedValueOnce(pageResponse([{ id: "t2" }]));
+
+      const result = await walk("/123/tags?q=bug");
+
+      expect(mockFetch.mock.calls[0][0]).toBe("https://app.fizzy.do/123/tags?q=bug");
+      expect(mockFetch.mock.calls[1][0]).toBe(
+        "https://app.fizzy.do/123/tags?q=bug&page=2"
+      );
+      expect(result).toEqual([{ id: "t1" }, { id: "t2" }]);
+    });
+
+    it("keeps walking after a 304 whose cached metadata advertises a next page", async () => {
+      // Page 1 is the page most likely to be served from the ETag cache, and a
+      // 304 that arrives without pagination headers falls back to the metadata
+      // stored with the body - which still has to drive the walk.
+      mockFetch
+        .mockResolvedValueOnce(
+          pageResponse([{ id: "b1" }], { ETag: 'W/"boards1"', ...nextLink(2) })
+        )
+        .mockResolvedValueOnce(pageResponse([{ id: "b2" }]));
+
+      await client.getBoards("123");
+      mockFetch.mockClear();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 304,
+          headers: new Headers({ ETag: 'W/"boards1"' }),
+        })
+        .mockResolvedValueOnce(pageResponse([{ id: "b2" }]));
+
+      const result = await client.getBoards("123");
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch.mock.calls[0][1].headers["If-None-Match"]).toBe('W/"boards1"');
+      expect(result).toEqual([{ id: "b1" }, { id: "b2" }]);
+    });
+
+    it("aggregates tags", async () => {
+      mockFetch
+        .mockResolvedValueOnce(
+          pageResponse([{ id: "t1" }], {
+            Link: '<https://app.fizzy.do/123/tags?page=2>; rel="next"',
+          })
+        )
+        .mockResolvedValueOnce(pageResponse([{ id: "t2" }]));
+
+      expect(await client.getTags("123")).toEqual([{ id: "t1" }, { id: "t2" }]);
+      expect(mockFetch.mock.calls[1][0]).toBe("https://app.fizzy.do/123/tags?page=2");
+    });
+
+    it("aggregates users", async () => {
+      mockFetch
+        .mockResolvedValueOnce(
+          pageResponse([{ id: "u1" }], {
+            Link: '<https://app.fizzy.do/123/users?page=2>; rel="next"',
+          })
+        )
+        .mockResolvedValueOnce(pageResponse([{ id: "u2" }]));
+
+      expect(await client.getUsers("123")).toEqual([{ id: "u1" }, { id: "u2" }]);
+      expect(mockFetch.mock.calls[1][0]).toBe("https://app.fizzy.do/123/users?page=2");
+    });
+
+    it("aggregates card comments", async () => {
+      mockFetch
+        .mockResolvedValueOnce(
+          pageResponse([{ id: "c1" }], {
+            Link: '<https://app.fizzy.do/123/cards/42/comments?page=2>; rel="next"',
+          })
+        )
+        .mockResolvedValueOnce(pageResponse([{ id: "c2" }]));
+
+      expect(await client.getCardComments("123", "42")).toEqual([
+        { id: "c1" },
+        { id: "c2" },
+      ]);
+      expect(mockFetch.mock.calls[1][0]).toBe(
+        "https://app.fizzy.do/123/cards/42/comments?page=2"
+      );
+    });
+  });
+
+  /**
+   * Notifications pagination
+   *
+   * NotificationsController#index renders `(@unread || []) + @page.records`, and
+   * only populates @unread when the request carries no `page` param. So paging
+   * this endpoint is not "more of the same list": page 2 onwards is read-only
+   * history, and aggregating it would grow without bound as notifications are
+   * read. Hence an explicit `page` rather than the walk the other lists get.
+   */
+  describe("Notifications pagination", () => {
+    const listResponse = (items: unknown[], headerValues: Record<string, string> = {}) => {
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(headerValues)) {
+        headers.set(name, value);
+      }
+      return { ok: true, status: 200, headers, json: async () => items };
+    };
+
+    it("requests the bare path when no page is given", async () => {
+      mockFetch.mockResolvedValueOnce(listResponse([{ id: "n1" }]));
+
+      await client.getNotifications("123");
+
+      expect(mockFetch.mock.calls[0][0]).toBe("https://app.fizzy.do/123/notifications");
+    });
+
+    it("requests the bare path for page 1, so the unread block is still returned", async () => {
+      mockFetch.mockResolvedValueOnce(listResponse([{ id: "n1" }]));
+
+      await client.getNotifications("123", { page: 1 });
+
+      expect(mockFetch.mock.calls[0][0]).toBe("https://app.fizzy.do/123/notifications");
+    });
+
+    it("requests ?page=N for later pages", async () => {
+      mockFetch.mockResolvedValueOnce(listResponse([{ id: "n9" }]));
+
+      await client.getNotifications("123", { page: 3 });
+
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        "https://app.fizzy.do/123/notifications?page=3"
+      );
+    });
+
+    it("does not aggregate, even when the response advertises a next page", async () => {
+      mockFetch.mockResolvedValueOnce(
+        listResponse([{ id: "n1" }], {
+          Link: '<https://app.fizzy.do/123/notifications?page=2>; rel="next"',
+        })
+      );
+
+      const result = await client.getNotifications("123");
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(result).toEqual([{ id: "n1" }]);
+    });
+
+    it.each([0, -1, 1.5, Number.NaN, 1e100])(
+      "rejects page %p without making a request",
+      async (page) => {
+        await expect(client.getNotifications("123", { page })).rejects.toThrow(
+          /page must be a positive integer/
+        );
+        expect(mockFetch).not.toHaveBeenCalled();
+      }
+    );
   });
 
   /**

@@ -46,14 +46,15 @@ function getColumnColorValue(color?: string): string | undefined {
 }
 
 /**
- * Validate the optional 1-based `page` argument of fizzy_get_cards.
+ * Validate the optional 1-based `page` argument shared by fizzy_get_cards and
+ * fizzy_get_notifications.
  *
  * Like the unsupported-filter guard below, this has to run here because the
  * Cloudflare transport executes raw args without zod. Digit strings are accepted
  * because LLM clients routinely send "2"; the stdio path rejects those upstream,
  * and being lenient here costs nothing.
  */
-function parseCardsPage(value: unknown): number | undefined {
+function parsePage(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "number" && Number.isSafeInteger(value) && value >= 1) {
     return value;
@@ -254,7 +255,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
       indexed_by: args.indexed_by as CardListOptions["indexed_by"],
       assignee_ids: args.assignee_ids as string[] | undefined,
       tag_ids: args.tag_ids as string[] | undefined,
-      page: parseCardsPage(args.page),
+      page: parsePage(args.page),
     };
     const result = await client.getCards(args.account_slug as string, options);
     if (fieldsMode === "full") return result;
@@ -712,7 +713,14 @@ export const toolHandlers: Record<string, ToolHandler> = {
   // ============ Notification Tools ============
   fizzy_get_notifications: async (client, args) => {
     const fieldsMode = parseFieldsMode(args.fields);
-    const notifications = await client.getNotifications(args.account_slug as string);
+    // Omitted means the client is called exactly as before, with no options
+    // object at all: that selects the page-less upstream request, the only one
+    // that returns unread items.
+    const page = parsePage(args.page);
+    const notifications =
+      page === undefined
+        ? await client.getNotifications(args.account_slug as string)
+        : await client.getNotifications(args.account_slug as string, { page });
     if (fieldsMode === "full") return notifications;
     return notifications.map((notification) =>
       summarizeNotification(notification as unknown as Record<string, unknown>)

@@ -28,7 +28,7 @@ export type FieldsMode = "summary" | "full";
  *
  * This has to exist (not just live in the zod schema) because the Cloudflare
  * transport executes raw args with no zod validation — mirrors the reasoning
- * behind `parseCardsPage` in tools/handlers.ts, and for the same reason: a
+ * behind `parsePage` in tools/handlers.ts, and for the same reason: a
  * bad value must fail loudly here rather than silently falling through to
  * `"full"` on one transport and a zod error on the other.
  */
