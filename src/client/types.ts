@@ -245,6 +245,9 @@ export interface FizzyIdentity {
 export type CardFilterOptions = {
   board_ids?: string[];
   column_ids?: string[];
+  // Each element is sanitized upstream (non-word chars except `"` become spaces), stemmed
+  // (which also strips the quotes), and OR-matched word by word in MySQL boolean mode;
+  // separate elements are ANDed. Results follow the filter's sort order, not relevance.
   terms?: string[];
   indexed_by?: "all" | "closed" | "not_now" | "stalled" | "postponing_soon" | "golden";
   assignee_ids?: string[];

@@ -170,7 +170,12 @@ export const getCardsSchema = z.object({
     "Omit to include cards regardless of tags."
   ),
   search: z.string().optional().describe(
-    "Text search to filter cards by content. Multi-word input is matched as a single search term. " +
+    "Text search over card titles, descriptions and comments. Fizzy splits the input on whitespace " +
+    "and punctuation (hyphens included), stems the words, and OR-matches them; results are ordered " +
+    "by last activity, not relevance. There is no phrase or exact-match syntax, and quotes are ignored. " +
+    "A multi-word or hyphenated query is therefore a broad recall query: total_count > 0 does not " +
+    "prove the exact string exists. For an existence check, search a single distinctive alphanumeric " +
+    "token and confirm the match in the returned cards. " +
     "Omit to return all cards (subject to other filters)."
   ),
   // Use .min(1) rather than .positive(): both mean "page >= 1" for an integer, but
