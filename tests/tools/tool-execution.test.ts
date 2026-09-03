@@ -626,6 +626,119 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
       });
     });
 
+    it("search_mode='all' sends one terms[] element per usable word and reports what it dropped", async () => {
+      const mockClient = {
+        getCards: vi.fn().mockResolvedValue({
+          cards: [], page: 1, total_count: 0, has_more: false, next_page: null,
+        }),
+      };
+
+      const result = await toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+        search: "prodmon-data-analyst cannot find the package",
+        search_mode: "all",
+      });
+
+      expect(mockClient.getCards.mock.calls[0][1].terms).toEqual([
+        "prodmon", "data", "analyst", "cannot", "find", "package",
+      ]);
+      expect(result).toMatchObject({
+        search_terms: ["prodmon", "data", "analyst", "cannot", "find", "package"],
+        ignored_search_terms: ["the"],
+      });
+    });
+
+    it("search_mode='all' adds the search fields to the summary projection too", async () => {
+      const mockClient = {
+        getCards: vi.fn().mockResolvedValue({
+          cards: [], page: 1, total_count: 0, has_more: false, next_page: null,
+        }),
+      };
+
+      const result = await toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+        search: "nunjucks",
+        search_mode: "all",
+        fields: "summary",
+      });
+
+      expect(result).toEqual({
+        cards: [], page: 1, total_count: 0, has_more: false, next_page: null,
+        search_terms: ["nunjucks"],
+        ignored_search_terms: [],
+      });
+    });
+
+    it("search_mode='any' (and the default) keeps the single terms[] element and adds no fields", async () => {
+      const payload = { cards: [], page: 1, total_count: 0, has_more: false, next_page: null };
+      const mockClient = { getCards: vi.fn().mockResolvedValue(payload) };
+
+      const result = await toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+        search: "urgent task",
+        search_mode: "any",
+      });
+
+      expect(mockClient.getCards.mock.calls[0][1].terms).toEqual(["urgent task"]);
+      expect(result).toEqual(payload);
+    });
+
+    it("omitted search_mode keeps the default summary response shape", async () => {
+      const mockClient = {
+        getCards: vi.fn().mockResolvedValue({
+          cards: [], page: 1, total_count: 0, has_more: false, next_page: null,
+        }),
+      };
+
+      const result = await toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+        account_slug: "123",
+        search: "urgent task",
+        fields: "summary",
+      });
+
+      expect(mockClient.getCards.mock.calls[0][1].terms).toEqual(["urgent task"]);
+      expect(result).toEqual({ cards: [], page: 1, total_count: 0, has_more: false, next_page: null });
+    });
+
+    it("search_mode='all' rejects an empty search instead of listing every card", async () => {
+      const mockClient = { getCards: vi.fn() };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          search: "",
+          search_mode: "all",
+        })
+      ).rejects.toThrow(/no searchable word in ""/);
+      expect(mockClient.getCards).not.toHaveBeenCalled();
+    });
+
+    it("search_mode='all' rejects a search with no usable word instead of silently returning nothing", async () => {
+      const mockClient = { getCards: vi.fn() };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          search: "to the ab",
+          search_mode: "all",
+        })
+      ).rejects.toThrow(/no searchable word/);
+      expect(mockClient.getCards).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unknown search_mode (the Cloudflare path skips zod validation)", async () => {
+      const mockClient = { getCards: vi.fn() };
+
+      await expect(
+        toolHandlers.fizzy_get_cards(mockClient as unknown as FizzyClient, {
+          account_slug: "123",
+          search: "nunjucks",
+          search_mode: "phrase",
+        })
+      ).rejects.toThrow(/Invalid search_mode/);
+      expect(mockClient.getCards).not.toHaveBeenCalled();
+    });
+
     it("passes a requested page through to the client", async () => {
       const mockClient = { getCards: vi.fn().mockResolvedValue({ cards: [] }) };
 

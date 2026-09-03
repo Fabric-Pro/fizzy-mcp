@@ -132,6 +132,9 @@ export const TOOL_DEFINITIONS = {
       description:
         "Get a page of cards in an account with optional filtering by board, indexed_by (e.g., 'golden' for priority cards), " +
         "column, assignees, tags, or search terms. " +
+        "search OR-matches its words by default; set search_mode='all' to require every usable word " +
+        "(stopwords and words under 3 characters are dropped and listed in ignored_search_terms), " +
+        "which is the mode to use when checking whether a card already exists. " +
         "Use board_id to scope results to a specific board and column_id to scope to a workflow column. " +
         "Results are PAGINATED with a server-controlled, variable page size, so never compute a page count " +
         "from the length of one page. " +

@@ -174,9 +174,19 @@ export const getCardsSchema = z.object({
     "and punctuation (hyphens included), stems the words, and OR-matches them; results are ordered " +
     "by last activity, not relevance. There is no phrase or exact-match syntax, and quotes are ignored. " +
     "A multi-word or hyphenated query is therefore a broad recall query: total_count > 0 does not " +
-    "prove the exact string exists. For an existence check, search a single distinctive alphanumeric " +
-    "token and confirm the match in the returned cards. " +
+    "prove the exact string exists. For an existence check, set search_mode to 'all' or search a " +
+    "single distinctive alphanumeric token, and confirm the match in the returned cards. " +
     "Omit to return all cards (subject to other filters)."
+  ),
+  search_mode: z.enum(["any", "all"]).optional().describe(
+    "How the words of `search` combine. 'any' (default) sends the whole string as one term, which " +
+    "Fizzy OR-matches word by word. 'all' splits it on whitespace and punctuation and requires every " +
+    "usable word to match, which makes search usable as an existence check before creating a card " +
+    "(still confirm the match in the returned cards: words are stemmed, not matched exactly). In 'all' " +
+    "mode, words shorter than 3 characters and MySQL full-text stopwords (the, to, with, for, ...) are " +
+    "dropped before the request because on their own they match nothing and would empty the result; " +
+    "the response then includes search_terms (sent) and ignored_search_terms (dropped). " +
+    "Errors if no usable word remains. Has no effect without `search`."
   ),
   // Use .min(1) rather than .positive(): both mean "page >= 1" for an integer, but
   // .positive() is an *exclusive* bound, which zod-to-json-schema renders as the

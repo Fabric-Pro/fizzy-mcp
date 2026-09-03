@@ -525,7 +525,7 @@ npx fizzy-mcp --transport http --port 3000
 ### Cards (6)
 | Tool | Description |
 |------|-------------|
-| `fizzy_get_cards` | List cards with optional filters (board, indexed_by, column, assignees, tags, search); `fields="summary"` returns a much smaller payload for browsing |
+| `fizzy_get_cards` | List cards with optional filters (board, indexed_by, column, assignees, tags, search); `search_mode="all"` requires every usable search word instead of any; `fields="summary"` returns a much smaller payload for browsing |
 | `fizzy_get_pins` | List the current user's pinned cards (not paginated, max 100); prefer `fields="summary"` |
 | `fizzy_get_card` | Get card details including description, assignees, tags |
 | `fizzy_create_card` | Create a new card with title, description, status, column, assignees, tags, due date |
