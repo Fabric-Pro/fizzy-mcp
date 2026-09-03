@@ -16,6 +16,7 @@ import {
   type FizzyCard,
 } from "../client/types.js";
 import { resolveCardNumber } from "../utils/card-resolver.js";
+import { splitSearchTerms, type SearchTerms } from "../utils/search-terms.js";
 import { attachmentHtml, resolveAttachment } from "../utils/attachments.js";
 import {
   parseFieldsMode,
@@ -54,6 +55,16 @@ function getColumnColorValue(color?: string): string | undefined {
  * because LLM clients routinely send "2"; the stdio path rejects those upstream,
  * and being lenient here costs nothing.
  */
+// The Cloudflare transport executes raw args without zod validation, so an
+// unknown mode must fail loudly here rather than silently fall back to "any".
+function parseSearchMode(value: unknown): "any" | "all" {
+  if (value === undefined || value === "any") return "any";
+  if (value === "all") return "all";
+  throw new Error(
+    `Invalid search_mode: ${JSON.stringify(value)}. Expected "any" or "all".`
+  );
+}
+
 function parsePage(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "number" && Number.isSafeInteger(value) && value >= 1) {
@@ -248,17 +259,43 @@ export const toolHandlers: Record<string, ToolHandler> = {
       );
     }
     const fieldsMode = parseFieldsMode(args.fields);
+    const searchMode = parseSearchMode(args.search_mode);
+    // Upstream ANDs separate terms[] elements and ORs the words inside one, so
+    // "all" sends one element per usable word; "any" keeps the single element.
+    let searchTerms: SearchTerms | undefined;
+    let terms: string[] | undefined;
+    if (searchMode === "all" && typeof args.search === "string") {
+      // An empty or all-stopword search must fail visibly here: falling through
+      // would list every card, which is the opposite of "every word must match".
+      searchTerms = splitSearchTerms(args.search);
+      if (searchTerms.terms.length === 0) {
+        const reason = searchTerms.ignored.length > 0
+          ? `: every word is a full-text stopword or shorter than 3 characters (${searchTerms.ignored.join(", ")})`
+          : "";
+        throw new Error(
+          `search_mode "all" found no searchable word in ${JSON.stringify(args.search)}${reason}. ` +
+          `Use a longer or more distinctive word.`
+        );
+      }
+      terms = searchTerms.terms;
+    } else if (args.search) {
+      terms = [args.search as string];
+    }
     const options: CardListOptions = {
       board_ids: args.board_id ? [args.board_id as string] : undefined,
       column_ids: args.column_id ? [args.column_id as string] : undefined,
-      terms: args.search ? [args.search as string] : undefined,
+      terms,
       indexed_by: args.indexed_by as CardListOptions["indexed_by"],
       assignee_ids: args.assignee_ids as string[] | undefined,
       tag_ids: args.tag_ids as string[] | undefined,
       page: parsePage(args.page),
     };
     const result = await client.getCards(args.account_slug as string, options);
-    if (fieldsMode === "full") return result;
+    // Only search_mode="all" adds fields; the default response shape is unchanged.
+    const searchFields = searchTerms
+      ? { search_terms: searchTerms.terms, ignored_search_terms: searchTerms.ignored }
+      : {};
+    if (fieldsMode === "full") return { ...result, ...searchFields };
     return {
       cards: result.cards.map((card) =>
         summarizeCard(card as unknown as Record<string, unknown>)
@@ -267,6 +304,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
       total_count: result.total_count,
       has_more: result.has_more,
       next_page: result.next_page,
+      ...searchFields,
     };
   },
 
