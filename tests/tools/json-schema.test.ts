@@ -165,10 +165,10 @@ describe("Tool JSON Schema — fizzy_get_cards pagination", () => {
     )!.schema;
 
     expect(
-      schema.safeParse({ account_slug: "6117483", page: 0 }).success
+      schema.safeParse({ account_slug: "123456", page: 0 }).success
     ).toBe(false);
     expect(
-      schema.safeParse({ account_slug: "6117483", page: 1 }).success
+      schema.safeParse({ account_slug: "123456", page: 1 }).success
     ).toBe(true);
   });
 });
