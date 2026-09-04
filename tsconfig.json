@@ -17,7 +17,12 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    // TypeScript 7 no longer auto-includes every @types/* package the way 5.x did, so
+    // without this every Node global (process, console, setInterval, URL, TextEncoder)
+    // resolves to "Cannot find name". tsconfig.cloudflare.json already listed its types
+    // explicitly, which is why only this config needed the change.
+    "types": ["node"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "src/cloudflare/**/*"]
