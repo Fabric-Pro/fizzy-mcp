@@ -12,7 +12,7 @@
  * @see https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
  */
 
-import type { DurableObjectState, DurableObjectNamespace } from "@cloudflare/workers-types";
+import type { DurableObjectNamespace } from "@cloudflare/workers-types";
 import { DurableObject } from "cloudflare:workers";
 
 /**
@@ -59,10 +59,6 @@ interface RateLimitState {
  */
 export class RateLimiterDO extends DurableObject<object> {
   private state: RateLimitState | null = null;
-
-  constructor(ctx: DurableObjectState, env: object) {
-    super(ctx, env);
-  }
 
   /**
    * Initialize state from storage
