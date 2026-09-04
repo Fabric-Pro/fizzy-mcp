@@ -2,7 +2,7 @@
 
 [![npm version](https://badge.fury.io/js/fizzy-mcp.svg)](https://www.npmjs.com/package/fizzy-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)](https://nodejs.org/)
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for [Fizzy](https://fizzy.do) — the project management tool by Basecamp.
 
@@ -99,7 +99,7 @@ Supports HTTP transport only:
 
 ## Prerequisites
 
-- **Node.js 18** or higher
+- **Node.js 20** or higher
 - A Fizzy account with API access
 
 ---
