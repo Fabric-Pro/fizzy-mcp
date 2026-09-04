@@ -60,7 +60,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241205.0",
+    "@cloudflare/workers-types": "^5.20260901.1",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.0",
     "dotenv": "^17.2.3",
