@@ -6,7 +6,7 @@ import { z } from "zod";
 
 // Common ID schemas with detailed descriptions
 export const accountSlugSchema = z.string().describe(
-  "The account slug identifier (e.g., '6117483' or '/6117483'). " +
+  "The account slug identifier (e.g., '123456' or '/123456'). " +
   "This identifies which Fizzy account to operate on. " +
   "Get available account slugs from fizzy_get_identity or fizzy_get_accounts."
 );

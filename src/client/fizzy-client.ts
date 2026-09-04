@@ -169,7 +169,7 @@ export class FizzyClient {
 
   /**
    * Normalize account slug by removing leading slash if present.
-   * The Fizzy API returns slugs like "/6117483" but API paths need "6117483"
+   * The Fizzy API returns slugs like "/123456" but API paths need "123456"
    */
   private normalizeSlug(slug: string): string {
     if (!slug) {

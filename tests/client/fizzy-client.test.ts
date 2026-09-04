@@ -185,10 +185,10 @@ describe("FizzyClient", () => {
         json: async () => [],
       });
 
-      await client.getBoards("/6117483");
+      await client.getBoards("/123456");
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/6117483/boards",
+        "https://app.fizzy.do/123456/boards",
         expect.any(Object)
       );
     });
@@ -200,10 +200,10 @@ describe("FizzyClient", () => {
         json: async () => [],
       });
 
-      await client.getBoards("6117483");
+      await client.getBoards("123456");
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/6117483/boards",
+        "https://app.fizzy.do/123456/boards",
         expect.any(Object)
       );
     });
@@ -1651,10 +1651,10 @@ describe("FizzyClient", () => {
     it("should strip the leading slash from the account slug for pins", async () => {
       mockFetch.mockResolvedValueOnce(createMockResponse([]));
 
-      await client.getPins("/6117483");
+      await client.getPins("/123456");
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/6117483/my/pins",
+        "https://app.fizzy.do/123456/my/pins",
         expect.any(Object)
       );
     });
