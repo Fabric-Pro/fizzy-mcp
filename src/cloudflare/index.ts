@@ -24,10 +24,11 @@
  * @see https://modelcontextprotocol.io/
  */
 
-import type { Env, ExecutionContext, SecurityResult, HealthResponse } from "./types.js";
+import type { Env, ExecutionContext, HealthResponse } from "./types.js";
 import { SERVER_VERSION } from "./types.js";
 import { RateLimiter, createLogger, createAnalytics, type LogLevel } from "./utils/index.js";
 import { buildWorkerErrorEnvelope } from "./utils/worker-errors.js";
+import { validateSecurity } from "./security.js";
 
 // Re-export Durable Object classes for Wrangler
 export { McpSessionDO } from "./mcp-session.js";
@@ -45,56 +46,6 @@ function extractFizzyToken(request: Request): string | null {
   }
   
   return null;
-}
-
-/**
- * Validate request security (Origin validation)
- */
-function validateSecurity(request: Request, env: Env): SecurityResult {
-  const origin = request.headers.get("Origin");
-  
-  // Parse allowed origins from env
-  const allowedOriginsStr = env.MCP_ALLOWED_ORIGINS || "*";
-  const allowedOrigins = allowedOriginsStr === "*" 
-    ? ["*"] 
-    : allowedOriginsStr.split(",").map(o => o.trim());
-
-  // Validate Origin header
-  if (origin && !allowedOrigins.includes("*")) {
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (allowed === origin) return true;
-      // Check localhost variants with any port
-      try {
-        const originUrl = new URL(origin);
-        const allowedUrl = new URL(allowed);
-        return originUrl.hostname === allowedUrl.hostname && 
-               originUrl.protocol === allowedUrl.protocol;
-      } catch {
-        return false;
-      }
-    });
-
-    if (!isAllowed) {
-      return {
-        allowed: false,
-        statusCode: 403,
-        error: "Origin not allowed",
-        corsOrigin: allowedOrigins[0],
-      };
-    }
-  }
-
-  // Determine CORS origin
-  let corsOrigin: string;
-  if (allowedOrigins.includes("*")) {
-    corsOrigin = "*";
-  } else if (origin && allowedOrigins.includes(origin)) {
-    corsOrigin = origin;
-  } else {
-    corsOrigin = allowedOrigins[0] || "*";
-  }
-
-  return { allowed: true, corsOrigin };
 }
 
 /**

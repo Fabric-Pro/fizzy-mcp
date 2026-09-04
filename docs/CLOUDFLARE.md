@@ -140,6 +140,11 @@ Configure in `wrangler.jsonc`:
 | `ENABLE_RATE_LIMIT` | No | `true` | Enable/disable rate limiting |
 | `ENABLE_CACHE` | No | `true` | Enable/disable KV caching |
 
+Origins are matched exactly. The one convenience is loopback: an entry written
+without a port (`http://localhost`) matches any port on that same scheme and
+hostname, while an entry that pins a port (`http://localhost:3000`) matches only
+that port — and never a different loopback hostname or scheme.
+
 ### Authentication Model (Multi-User)
 
 **The server does NOT store any Fizzy tokens.** Each client provides their own token:

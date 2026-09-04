@@ -12,12 +12,23 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   error: 3,
 };
 
+/**
+ * Escape CR/LF in caller-supplied text so a message can never forge extra log
+ * lines. Each record is a single line; `data` is safe already because
+ * `JSON.stringify` escapes newlines inside the values it serialises.
+ */
+function escapeNewlines(value: string): string {
+  return value.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+}
+
 class Logger {
   private level: LogLevel;
   private prefix: string;
 
   constructor(prefix = "fizzy-mcp") {
-    this.prefix = prefix;
+    // Escaped here too so the one-record-per-line guarantee holds structurally,
+    // not just for the prefixes this repo happens to pass.
+    this.prefix = escapeNewlines(prefix);
     this.level = (process.env.LOG_LEVEL as LogLevel) || "info";
   }
 
@@ -28,7 +39,7 @@ class Logger {
   private formatMessage(level: LogLevel, message: string, data?: unknown): string {
     const timestamp = new Date().toISOString();
     const dataStr = data ? ` ${JSON.stringify(data)}` : "";
-    return `[${timestamp}] [${this.prefix}] [${level.toUpperCase()}] ${message}${dataStr}`;
+    return `[${timestamp}] [${this.prefix}] [${level.toUpperCase()}] ${escapeNewlines(message)}${dataStr}`;
   }
 
   debug(message: string, data?: unknown): void {

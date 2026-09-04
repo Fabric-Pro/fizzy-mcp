@@ -19,6 +19,7 @@
 
 import { IncomingMessage, ServerResponse } from "node:http";
 import { logger } from "./logger.js";
+import { isOriginAllowed } from "./origin.js";
 
 const log = logger.child("security");
 
@@ -106,60 +107,6 @@ export function resolveSecurityOptions(options: SecurityOptions = {}): SecurityO
     localhostOnly: options.localhostOnly ?? envOptions.localhostOnly ?? true,
     skipHealthCheck: options.skipHealthCheck ?? true,
   };
-}
-
-/**
- * Localhost origins (used when specific localhost origins are configured)
- */
-const LOCALHOST_ORIGINS = [
-  "http://localhost",
-  "http://127.0.0.1",
-  "https://localhost",
-  "https://127.0.0.1",
-];
-
-/**
- * Check if an origin matches the allowed patterns
- * Supports exact match and localhost with any port
- */
-function isOriginAllowed(origin: string, allowedOrigins: string[]): boolean {
-  // Wildcard allows all
-  if (allowedOrigins.includes("*")) {
-    return true;
-  }
-  
-  // Exact match
-  if (allowedOrigins.includes(origin)) {
-    return true;
-  }
-  
-  // Check localhost with any port
-  try {
-    const url = new URL(origin);
-    const hostWithoutPort = `${url.protocol}//${url.hostname}`;
-    
-    // Check if it's a localhost variant
-    if (LOCALHOST_ORIGINS.includes(hostWithoutPort)) {
-      // Check if base localhost origin is in allowed list
-      return allowedOrigins.some(allowed => {
-        if (LOCALHOST_ORIGINS.includes(allowed)) {
-          return true;
-        }
-        try {
-          const allowedUrl = new URL(allowed);
-          return allowedUrl.hostname === url.hostname && 
-                 allowedUrl.protocol === url.protocol;
-        } catch {
-          return false;
-        }
-      });
-    }
-  } catch {
-    // Invalid URL
-    return false;
-  }
-  
-  return false;
 }
 
 /**
