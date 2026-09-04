@@ -43,9 +43,18 @@ If you're setting up npm publishing for the first time:
 
 ## Version Guidelines
 
-- **patch** (1.0.x): Bug fixes, documentation updates, dependency updates
+- **patch** (1.0.x): Bug fixes, documentation updates, dependency updates that keep the
+  install contract intact
 - **minor** (1.x.0): New features that are backwards compatible
-- **major** (x.0.0): Breaking changes to the API or tool signatures
+- **major** (x.0.0): Breaking changes to the API or tool signatures, **or any raise of
+  `engines.node`**
+
+A dependency update is only a patch while it stays invisible to consumers. Raising
+`engines.node` is a breaking change even though no API moved: `npm install fizzy-mcp` starts
+warning, and fails outright under `engine-strict`, on runtimes that worked before. Dependency
+bumps can force this without anyone editing `engines` deliberately — a transitive package
+picking up a higher floor is enough — so check `engines.node` against the previous release
+before choosing a bump, not just the diff of hand-written code.
 
 ## Verifying Publication
 
