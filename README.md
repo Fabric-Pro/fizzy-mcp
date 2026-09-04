@@ -522,7 +522,7 @@ npx fizzy-mcp --transport http --port 3000
 
 ---
 
-## Available Tools (53 total)
+## Available Tools (54 total)
 
 ### Identity & Accounts (2)
 | Tool | Description |
@@ -544,7 +544,7 @@ npx fizzy-mcp --transport http --port 3000
 |------|-------------|
 | `fizzy_get_cards` | List cards with optional filters (board, indexed_by, column, assignees, tags, search); `search_mode="all"` requires every usable search word instead of any; `fields="summary"` returns a much smaller payload for browsing |
 | `fizzy_get_pins` | List the current user's pinned cards (not paginated, max 100); prefer `fields="summary"` |
-| `fizzy_get_card` | Get card details including description, assignees, tags |
+| `fizzy_get_card` | Get card details including description, assignees, tags; `include_attachments=true` adds structured attachment metadata |
 | `fizzy_create_card` | Create a new card with title, description, status, column, assignees, tags, due date |
 | `fizzy_update_card` | Update any card property |
 | `fizzy_delete_card` | Delete a card |
@@ -569,7 +569,7 @@ npx fizzy-mcp --transport http --port 3000
 ### Comments (5)
 | Tool | Description |
 |------|-------------|
-| `fizzy_get_card_comments` | List comments on a card (complete thread; every upstream page is fetched server-side); `fields="summary"` drops the duplicated HTML body and repeated card/creator detail |
+| `fizzy_get_card_comments` | List comments on a card (complete thread; every upstream page is fetched server-side); `fields="summary"` drops the duplicated HTML body and repeated card/creator detail; `include_attachments=true` adds structured attachment metadata |
 | `fizzy_get_comment` | Get a specific comment |
 | `fizzy_create_comment` | Add a comment to a card (supports HTML) |
 | `fizzy_update_comment` | Update a comment |
@@ -620,10 +620,11 @@ npx fizzy-mcp --transport http --port 3000
 | `fizzy_mark_notification_unread` | Mark notification as unread |
 | `fizzy_mark_all_notifications_read` | Mark all notifications as read |
 
-### Attachments (1)
+### Attachments (2)
 | Tool | Description |
 |------|-------------|
 | `fizzy_upload_file` | Upload a file and get back HTML that embeds it in rich text |
+| `fizzy_get_attachment` | Fetch a file already attached to a card or comment; images come back as an image |
 
 #### Attaching a file to a card or comment
 
@@ -672,6 +673,62 @@ HTTP and SSE transports serve remote callers — honouring a path there would le
 client read the *server's* disk — and Workers have no filesystem. Uploads are
 capped at 10 MB on both paths.
 
+#### Reading an attachment that is already on a card
+
+The API never reports attachments as data. They exist only as
+`<action-text-attachment>` markup inside the rich-text HTML — `description_html`
+on a card, `body.html` on a comment — and the plain-text rendering flattens each
+one to a bare `[filename.png]` with no URL. Reading one back is therefore two
+steps.
+
+`include_attachments` is opt-in and changes nothing when omitted: without it,
+both tools return exactly the response they always did.
+
+```jsonc
+// 1. Ask for the structured metadata alongside the card.
+{ "name": "fizzy_get_card",
+  "arguments": { "account_slug": "1234567", "card_id": "42", "include_attachments": true } }
+
+// Adds an "attachments" array to the usual card payload:
+// [{
+//   "filename": "screenshot.png",
+//   "content_type": "image/png",
+//   "byte_size": 204800,
+//   "width": 1600,
+//   "height": 900,
+//   "signed_id": "eyJfcmFpbHMi...--1111...",
+//   "url": "https://app.fizzy.do/1234567/rails/active_storage/blobs/redirect/...",
+//   "preview_url": "https://app.fizzy.do/1234567/rails/active_storage/representations/redirect/...",
+//   "preview_variation": "eyJfcmFpbHMi...--3333..."
+// }]
+
+// 2. Fetch it. Pass preview_variation as `variation` to get the resized
+//    preview, which is what a model can usefully look at.
+{ "name": "fizzy_get_attachment",
+  "arguments": {
+    "account_slug": "1234567",
+    "signed_id": "eyJfcmFpbHMi...--1111...",
+    "filename": "screenshot.png",
+    "variation": "eyJfcmFpbHMi...--3333..."
+  } }
+```
+
+PNG, JPEG, GIF and WebP come back as an MCP image block the model can see.
+Anything else — PDFs, archives, SVG, video — comes back as metadata with a note
+that it is not renderable, and its bytes are never downloaded.
+
+**`fizzy_get_attachment` takes no URL, by design.** Fetching a caller-supplied
+URL with the account's access token attached would be a server-side request
+forgery carrying a credential, so the tool takes the blob's `signed_id` and
+rebuilds the address itself. Inlined images are capped at 3 MB — Base64 inflates
+by ~4/3 into the response — and an original over that is refused in favour of its
+preview rather than truncated.
+
+The token is never sent to the storage host. ActiveStorage answers with a
+redirect to a signed storage URL, and that redirect is followed by hand: the
+`Authorization` header is attached only while the URL is still on the configured
+Fizzy origin, rather than trusting a runtime to strip credentials across origins.
+
 ---
 
 ## Example Prompts
@@ -685,6 +742,7 @@ Once configured, you can ask your AI assistant things like:
 - "Move the 'Design review' card to the 'Done' column"
 - "Add a comment to the authentication card saying 'Ready for review'"
 - "Attach this screenshot to card 42 as evidence"
+- "Show me the screenshot attached to card 42"
 - "Show me my unread notifications"
 - "List all users in my account"
 - "Create a new column called 'In Review' with blue color on the Engineering board"

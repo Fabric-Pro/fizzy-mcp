@@ -24,6 +24,7 @@
     "src/utils/errors.ts",
     "src/utils/etag-cache.ts",
     "src/utils/logger.ts",
+    "src/utils/action-text.ts",
     "src/utils/attachments.ts",
     "src/utils/base64.ts",
     "src/utils/client-auth.ts",

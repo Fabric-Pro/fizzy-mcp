@@ -76,6 +76,7 @@ describe("published tool schemas", () => {
       "card_id",
       "card_number",
       "fields",
+      "include_attachments",
     ]);
   });
 

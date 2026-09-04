@@ -17,7 +17,16 @@ import {
 } from "../client/types.js";
 import { resolveCardNumber } from "../utils/card-resolver.js";
 import { splitSearchTerms, type SearchTerms } from "../utils/search-terms.js";
-import { attachmentHtml, resolveAttachment } from "../utils/attachments.js";
+import { parseActionTextAttachments } from "../utils/action-text.js";
+import {
+  attachmentHtml,
+  isInlineableImage,
+  parseAttachmentRequest,
+  resolveAttachment,
+  MAX_INLINE_IMAGE_BYTES,
+} from "../utils/attachments.js";
+import { bytesToBase64 } from "../utils/base64.js";
+import { FizzyAttachmentTooLargeError } from "../utils/errors.js";
 import {
   parseFieldsMode,
   summarizeCard,
@@ -29,6 +38,76 @@ import {
  * Tool handler result - either data to serialize or a success message
  */
 export type HandlerResult = unknown;
+
+/**
+ * A block of an MCP tool response, for the handlers that need to return
+ * something other than serialized JSON.
+ */
+export type McpContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+
+/**
+ * A handler result that is already MCP content rather than data to serialize.
+ *
+ * Both transports format a handler's return value the same way — a string
+ * verbatim, anything else as pretty-printed JSON in a single `text` block — and
+ * that is right for every tool but one. `fizzy_get_attachment` has to emit an
+ * `image` block, which no amount of JSON in a text block substitutes for: the
+ * point of the tool is that the model can *see* the screenshot. Rather than
+ * teaching each transport about that tool, handlers can return this marker and
+ * both formatters pass its blocks straight through.
+ */
+export interface McpContentResult {
+  mcp_content: McpContentBlock[];
+}
+
+/** Wrap MCP content blocks so the transports forward them unchanged. */
+export function mcpContent(blocks: McpContentBlock[]): McpContentResult {
+  return { mcp_content: blocks };
+}
+
+function isMcpContentBlock(value: unknown): value is McpContentBlock {
+  if (typeof value !== "object" || value === null) return false;
+  const block = value as Record<string, unknown>;
+  if (block.type === "text") return typeof block.text === "string";
+  if (block.type === "image") {
+    return typeof block.data === "string" && typeof block.mimeType === "string";
+  }
+  return false;
+}
+
+/**
+ * Whether a handler result is pre-formatted MCP content.
+ *
+ * Every block is shape-checked, not just the marker key. An API response that
+ * happened to carry an `mcp_content` array would otherwise be reinterpreted as
+ * content blocks and silently lose its data; requiring each element to be a
+ * well-formed block makes that collision effectively impossible.
+ */
+export function isMcpContentResult(result: unknown): result is McpContentResult {
+  if (typeof result !== "object" || result === null) return false;
+  const blocks = (result as Record<string, unknown>).mcp_content;
+  return Array.isArray(blocks) && blocks.length > 0 && blocks.every(isMcpContentBlock);
+}
+
+/**
+ * Render a handler result as the `content` array of an MCP tool response.
+ *
+ * One function rather than one per transport: the standard server and the
+ * Cloudflare Durable Object previously each carried their own copy of this
+ * two-line rule, and a tool whose response formatting differed between them
+ * would be a bug nobody could see from either side.
+ */
+export function toMcpContent(result: unknown): McpContentBlock[] {
+  if (isMcpContentResult(result)) return result.mcp_content;
+  return [
+    {
+      type: "text",
+      text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+    },
+  ];
+}
 
 /**
  * Tool handler function signature
@@ -63,6 +142,43 @@ function parseSearchMode(value: unknown): "any" | "all" {
   throw new Error(
     `Invalid search_mode: ${JSON.stringify(value)}. Expected "any" or "all".`
   );
+}
+
+/**
+ * Validate the optional `include_attachments` flag of fizzy_get_card and
+ * fizzy_get_card_comments.
+ *
+ * Here rather than only in the Zod schema for the usual reason — the Cloudflare
+ * transport dispatches raw args — and with the usual leniency about `"true"`,
+ * which LLM clients send routinely for a boolean.
+ *
+ * Anything else throws rather than defaulting to `false`. Silently ignoring a
+ * malformed value would hand back a response with no `attachments` field and no
+ * indication why, which reads as "this card has no attachments".
+ */
+function parseIncludeAttachments(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value === "boolean") return value;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(
+    `include_attachments must be a boolean, got: ${JSON.stringify(value)}`
+  );
+}
+
+/**
+ * The HTML side of a rich-text field, whether it arrives as `{html, plain_text}`
+ * (a comment body) or as a bare string (a card's `description_html`).
+ *
+ * Structural and defensive, like the projections: `description_html` is one of
+ * the fields the live API returns and `client/types.ts` does not model.
+ */
+function richTextHtml(value: unknown): unknown {
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null) {
+    return (value as Record<string, unknown>).html;
+  }
+  return undefined;
 }
 
 function parsePage(value: unknown): number | undefined {
@@ -309,7 +425,32 @@ export const toolHandlers: Record<string, ToolHandler> = {
   },
 
   fizzy_get_card: async (client, args) => {
-    return client.getCard(args.account_slug as string, args.card_id as string);
+    // Parsed before the request so a malformed flag fails without spending an
+    // API round-trip, the same ordering fizzy_get_pins uses for `fields`.
+    const includeAttachments = parseIncludeAttachments(args.include_attachments);
+    const card = await client.getCard(
+      args.account_slug as string,
+      args.card_id as string
+    );
+    // Without the flag this returns the client's value untouched — the response
+    // is byte-for-byte what it was before include_attachments existed.
+    if (!includeAttachments) return card;
+
+    // Defensive: the declared return type says this is always an object, but a
+    // 204 or an empty body reaches here as undefined, and spreading that throws.
+    if (typeof card !== "object" || card === null) return card;
+
+    const record = card as unknown as Record<string, unknown>;
+    return {
+      ...record,
+      // `description_html` is one of the fields the live API returns and
+      // client/types.ts does not model; parseActionTextAttachments takes
+      // `unknown` precisely so this needs no cast to reach it.
+      attachments: parseActionTextAttachments(
+        richTextHtml(record.description_html),
+        client.getBaseUrl()
+      ),
+    };
   },
 
   // Assignments are applied *after* the card exists rather than in the create
@@ -563,6 +704,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
     // unvalidated Cloudflare path a bad `fields` value would otherwise spend a request
     // first, and a failure there would mask the real invalid-argument error.
     const fieldsMode = parseFieldsMode(args.fields);
+    const includeAttachments = parseIncludeAttachments(args.include_attachments);
     const cardNumber = await resolveCardNumber(
       client,
       args.account_slug as string,
@@ -570,10 +712,27 @@ export const toolHandlers: Record<string, ToolHandler> = {
       args.card_number as string | undefined
     );
     const comments = await client.getCardComments(args.account_slug as string, cardNumber);
-    if (fieldsMode === "full") return comments;
-    return comments.map((comment) =>
-      summarizeComment(comment as unknown as Record<string, unknown>)
-    );
+
+    // Both modes' existing output is produced first and returned untouched when
+    // the flag is absent, so neither response shape moves for existing callers.
+    if (!includeAttachments) {
+      if (fieldsMode === "full") return comments;
+      return comments.map((comment) =>
+        summarizeComment(comment as unknown as Record<string, unknown>)
+      );
+    }
+
+    // Attachments are added in summary mode too, and are most useful there:
+    // summarizeComment drops `body.html`, which is the only place they appear.
+    const baseUrl = client.getBaseUrl();
+    return comments.map((comment) => {
+      const record = comment as unknown as Record<string, unknown>;
+      const projected = fieldsMode === "full" ? record : summarizeComment(record);
+      return {
+        ...projected,
+        attachments: parseActionTextAttachments(richTextHtml(record.body), baseUrl),
+      };
+    });
   },
 
   fizzy_get_comment: async (client, args) => {
@@ -803,6 +962,61 @@ export const toolHandlers: Record<string, ToolHandler> = {
         "example as the 'body' of fizzy_create_comment, or the 'description' of " +
         "fizzy_update_card. Do not rebuild the tag by hand.",
     };
+  },
+
+  // Reads an attachment back so the model can look at it. The security
+  // properties this depends on live one layer down, deliberately:
+  // parseAttachmentRequest refuses a caller-supplied URL and pins every token to
+  // a single path segment, and FizzyClient.fetchAttachment walks the redirect to
+  // storage by hand so the Fizzy token never leaves the Fizzy origin.
+  fizzy_get_attachment: async (client, args) => {
+    const { accountSlug, ...ref } = parseAttachmentRequest(args);
+
+    let fetched;
+    try {
+      fetched = await client.fetchAttachment(accountSlug, ref, {
+        maxBytes: MAX_INLINE_IMAGE_BYTES,
+        // A zip or a video has nothing a model can look at, so its bytes are
+        // never downloaded — the caller gets the metadata and an explanation
+        // instead of megabytes of base64.
+        shouldReadBody: isInlineableImage,
+      });
+    } catch (error) {
+      if (error instanceof FizzyAttachmentTooLargeError && ref.variation === undefined) {
+        throw new Error(
+          `${error.message}. Re-request it with the attachment's 'preview_variation' ` +
+            `as 'variation' to fetch the resized preview instead.`
+        );
+      }
+      throw error;
+    }
+
+    const contentType = fetched.contentType || "application/octet-stream";
+    const summary = {
+      filename: ref.filename,
+      content_type: contentType,
+      byte_size: fetched.byteSize,
+      variant: ref.variation ? "preview" : "original",
+    };
+
+    if (fetched.bytes === undefined) {
+      return {
+        ...summary,
+        renderable: false,
+        note:
+          `This attachment is ${contentType}, which cannot be shown as an image, so its ` +
+          `bytes were not downloaded. Open the attachment's 'url' in a browser to view it.`,
+      };
+    }
+
+    return mcpContent([
+      { type: "text", text: JSON.stringify(summary, null, 2) },
+      {
+        type: "image",
+        data: bytesToBase64(fetched.bytes),
+        mimeType: contentType,
+      },
+    ]);
   },
 };
 

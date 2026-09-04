@@ -39,7 +39,7 @@ import {
   buildMcpToolDefinitions,
   type McpToolDefinition,
 } from "../tools/json-schema.js";
-import { executeToolHandler } from "../tools/handlers.js";
+import { executeToolHandler, toMcpContent } from "../tools/handlers.js";
 import { CLIENT_AUTH_HEADER } from "../utils/client-auth.js";
 
 /**
@@ -360,12 +360,10 @@ export class McpSessionDO extends DurableObject<Env> {
         jsonrpc: "2.0",
         id,
         result: {
-          content: [
-            {
-              type: "text",
-              text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
-            },
-          ],
+          // Shared with server.ts rather than reimplemented, so both transports
+          // format a tool result identically — including fizzy_get_attachment,
+          // whose `image` block JSON in a text block cannot stand in for.
+          content: toMcpContent(result),
         },
       };
     } catch (error) {

@@ -177,7 +177,14 @@ export const TOOL_DEFINITIONS = {
       description:
         "Get detailed information about a specific card including full description (HTML), " +
         "assignees, tags, due dates, steps (to-dos), and metadata. " +
-        "Use this to see complete card content before making updates.",
+        "Use this to see complete card content before making updates. " +
+        "Attachments — screenshots, images, PDFs, logs — appear in the description only as " +
+        "raw <action-text-attachment> markup, and the plain-text description flattens them " +
+        "to a bare filename with no way to fetch them. Pass include_attachments=true to also " +
+        "get an 'attachments' array with each file's filename, content_type, byte_size, " +
+        "dimensions and signed_id; pass that signed_id and filename to fizzy_get_attachment " +
+        "to actually see an image. Do that whenever a card mentions a screenshot or the " +
+        "answer depends on what a picture shows.",
       schema: schemas.getCardSchema,
       annotations: {
         readOnlyHint: true,
@@ -399,7 +406,12 @@ export const TOOL_DEFINITIONS = {
         "The result is the complete thread: every upstream page is fetched server-side, so there is no page " +
         "parameter and nothing further to request. " +
         "Use fields='summary' to drop the duplicated HTML body and the repeated per-comment card/creator " +
-        "detail — comment text itself is never truncated in either mode.",
+        "detail — comment text itself is never truncated in either mode. " +
+        "Attachments posted in a comment appear only as raw <action-text-attachment> markup inside the " +
+        "HTML body, which fields='summary' drops entirely. Pass include_attachments=true to add a " +
+        "per-comment 'attachments' array with each file's filename, content_type, byte_size, dimensions " +
+        "and signed_id — it works in both modes — then pass that signed_id and filename to " +
+        "fizzy_get_attachment to actually see an image.",
       schema: schemas.getCardCommentsSchema,
       annotations: {
         readOnlyHint: true,
@@ -758,6 +770,28 @@ export const TOOL_DEFINITIONS = {
       schema: schemas.uploadFileSchema,
       annotations: {
         readOnlyHint: false,
+        destructiveHint: false,
+      },
+    },
+    {
+      name: "fizzy_get_attachment",
+      title: "Get Attachment",
+      description:
+        "Fetch a file already attached to a card or comment and return it so it can actually be " +
+        "looked at. Images (PNG, JPEG, GIF, WebP) come back as an image the model can see; any " +
+        "other type comes back as metadata with a note that it cannot be rendered, and its bytes " +
+        "are not downloaded. " +
+        "Get the 'signed_id' and 'filename' to pass here from fizzy_get_card or " +
+        "fizzy_get_card_comments called with include_attachments=true — this tool takes no URL, " +
+        "and building the arguments from a URL by hand will not work. " +
+        "Prefer the preview: when the attachment reports a 'preview_variation', pass it as " +
+        "'variation' to get the resized version, which is a fraction of the bytes and is what a " +
+        "full-resolution screenshot is refused in favour of. " +
+        "Use this whenever a card or comment references a screenshot, mockup, diagram, or error " +
+        "image and the answer depends on what it shows.",
+      schema: schemas.getAttachmentSchema,
+      annotations: {
+        readOnlyHint: true,
         destructiveHint: false,
       },
     },

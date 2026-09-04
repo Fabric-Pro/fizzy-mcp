@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   MAX_ATTACHMENT_BYTES,
+  MAX_INLINE_IMAGE_BYTES,
   attachmentHtml,
   contentTypeForFilename,
+  isInlineableImage,
+  parseAttachmentRequest,
   resolveAttachment,
 } from "../../src/utils/attachments.js";
 import { maxEncodedLength } from "../../src/utils/base64.js";
@@ -215,5 +218,116 @@ describe("resolveAttachment", () => {
       setLocalFileReader(async () => new Uint8Array(MAX_ATTACHMENT_BYTES));
       await expect(resolveAttachment({ file_path: "big.png" })).resolves.toBeDefined();
     });
+  });
+});
+
+describe("isInlineableImage", () => {
+  it.each(["image/png", "image/jpeg", "image/gif", "image/webp", "IMAGE/PNG"])(
+    "accepts %s",
+    (contentType) => {
+      expect(isInlineableImage(contentType)).toBe(true);
+    }
+  );
+
+  it.each([
+    // Vector and exotic raster formats: a vision model cannot decode these, so
+    // returning an image block for them produces a client error, not a picture.
+    "image/svg+xml",
+    "image/tiff",
+    "image/heic",
+    "image/bmp",
+    "application/pdf",
+    "application/zip",
+    "text/plain",
+    "",
+  ])("declines %s", (contentType) => {
+    expect(isInlineableImage(contentType)).toBe(false);
+  });
+});
+
+describe("MAX_INLINE_IMAGE_BYTES", () => {
+  it("is well under the upload cap, because base64 inflates into the response", () => {
+    expect(MAX_INLINE_IMAGE_BYTES).toBeLessThan(MAX_ATTACHMENT_BYTES);
+    // 4/3 inflation has to stay inside the 5 MB per-image API ceiling.
+    expect(Math.ceil((MAX_INLINE_IMAGE_BYTES * 4) / 3)).toBeLessThan(5 * 1024 * 1024);
+  });
+});
+
+describe("parseAttachmentRequest", () => {
+  const SIGNED_ID =
+    "eyJfcmFpbHMiOnsiZGF0YSI6ImV4YW1wbGVibG9iaWQiLCJwdXIiOiJibG9iX2lkIn19--1111111111111111111111111111111111111111";
+
+  it("returns the validated parts, with the account slug normalized", () => {
+    expect(
+      parseAttachmentRequest({
+        account_slug: "/1234567",
+        signed_id: SIGNED_ID,
+        filename: "screenshot.png",
+      })
+    ).toEqual({
+      accountSlug: "1234567",
+      signedId: SIGNED_ID,
+      filename: "screenshot.png",
+    });
+  });
+
+  it("carries a variation token through when one is given", () => {
+    const variation = "eyJfcmFpbHMiOnt9fQ==--4444444444444444444444444444444444444444";
+    expect(
+      parseAttachmentRequest({
+        account_slug: "1234567",
+        signed_id: SIGNED_ID,
+        filename: "a.png",
+        variation,
+      }).variation
+    ).toBe(variation);
+  });
+
+  it("treats an empty or null variation as absent rather than as a token", () => {
+    const base = { account_slug: "1234567", signed_id: SIGNED_ID, filename: "a.png" };
+    expect(parseAttachmentRequest({ ...base, variation: "" }).variation).toBeUndefined();
+    expect(parseAttachmentRequest({ ...base, variation: null }).variation).toBeUndefined();
+  });
+
+  it("rejects a non-string variation", () => {
+    expect(() =>
+      parseAttachmentRequest({
+        account_slug: "1234567",
+        signed_id: SIGNED_ID,
+        filename: "a.png",
+        variation: 7,
+      })
+    ).toThrow(/variation must be a string/);
+  });
+
+  it("rejects a signed id long enough to be a payload rather than a token", () => {
+    expect(() =>
+      parseAttachmentRequest({
+        account_slug: "1234567",
+        signed_id: "a".repeat(5000),
+        filename: "a.png",
+      })
+    ).toThrow(/too long/);
+  });
+
+  it("rejects a filename longer than a filesystem would accept", () => {
+    expect(() =>
+      parseAttachmentRequest({
+        account_slug: "1234567",
+        signed_id: SIGNED_ID,
+        filename: `${"a".repeat(300)}.png`,
+      })
+    ).toThrow(/filename is too long/);
+  });
+
+  it("rejects a filename carrying a control character", () => {
+    // A NUL truncates a path in anything that hands it to a C API downstream.
+    expect(() =>
+      parseAttachmentRequest({
+        account_slug: "1234567",
+        signed_id: SIGNED_ID,
+        filename: "a\u0000.png",
+      })
+    ).toThrow(/control characters/);
   });
 });

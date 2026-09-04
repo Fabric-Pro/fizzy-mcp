@@ -1,6 +1,7 @@
 /**
  * Turning a tool call's arguments into the bytes Fizzy's direct-upload flow
- * needs, plus the ActionText markup that references the result.
+ * needs and the ActionText markup that references the result, plus the reverse
+ * direction: validating the arguments that name an attachment to read back.
  *
  * Validation lives here rather than in the Zod schema, for two reasons: the
  * Cloudflare transport executes raw arguments without Zod at all — the same
@@ -8,8 +9,14 @@
  * either/or rules cannot be expressed as Zod refinements without turning the
  * schema into a ZodEffects, which `McpServer.registerTool` publishes to stdio
  * clients as an empty property list. So this is the only place they live.
+ *
+ * For the read direction that reasoning is not a convenience, it is the
+ * security boundary: the tokens validated below are interpolated into a URL
+ * path that is then fetched with the caller's Fizzy credential attached, and
+ * the Workers path would otherwise reach that fetch with no validation at all.
  */
 
+import type { AttachmentRef } from "../client/types.js";
 import { base64ToBytes, maxEncodedLength } from "./base64.js";
 import { getLocalFileReader } from "./file-source.js";
 
@@ -171,4 +178,201 @@ export async function resolveAttachment(
     filename,
     contentType: explicitContentType ?? contentTypeForFilename(filename),
   };
+}
+
+// ============ Reading an attachment back ============
+
+/**
+ * Upper bound on an image inlined into a tool response as an MCP `image`
+ * content block.
+ *
+ * Deliberately well below {@link MAX_ATTACHMENT_BYTES}. The upload direction
+ * spends its budget once, on a frame the client already holds in memory; an
+ * inlined image is base64 in the response *and* then decoded, re-encoded and
+ * charged as vision tokens by whatever model receives it. 3 MB of image is a
+ * ~4 MB base64 payload, which stays inside the 5 MB per-image ceiling the
+ * Anthropic Messages API applies — the practical limit long before any
+ * transport's.
+ *
+ * A full-resolution screenshot over this is not truncated: the caller is told
+ * to re-request it with the `variation` token from the attachment's
+ * `preview_variation`, which is what they wanted anyway.
+ */
+export const MAX_INLINE_IMAGE_BYTES = 3 * 1024 * 1024;
+
+/**
+ * The image media types worth returning as an MCP `image` content block.
+ *
+ * Narrower than `image/*` on purpose. The set is what vision models actually
+ * decode; handing back an `image/svg+xml` or `image/tiff` block produces a
+ * client-side error rather than a picture, and a caller is better served by
+ * being told the type is not renderable than by a failed response. Anything
+ * outside this set is reported as metadata instead.
+ */
+const INLINEABLE_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+/** Whether an attachment of this media type can be returned as an image block. */
+export function isInlineableImage(contentType: string): boolean {
+  return INLINEABLE_IMAGE_TYPES.has(contentType.toLowerCase());
+}
+
+/**
+ * Characters a Rails signed id or an ActiveStorage variation token can contain.
+ *
+ * Both are URL-safe base64 payloads joined to a hex digest by `--`, so the
+ * alphabet is deliberately narrow. What matters is not what it admits but what
+ * it excludes: `/` and `\` cannot appear, so a token can never introduce a path
+ * segment of its own, and `%` cannot appear, so it cannot smuggle an encoded
+ * one either. `.` is admitted because it is legal in the alphabet, and the
+ * traversal it would otherwise enable is closed by rejecting a token that is
+ * exactly `.` or `..` — without a separator, no other spelling traverses.
+ */
+const SIGNED_TOKEN_PATTERN = /^[A-Za-z0-9_.~=+-]+$/;
+
+/**
+ * Generous next to a real signed id (a few hundred characters) and still short
+ * enough that a rejected token never becomes a multi-kilobyte error message.
+ */
+const MAX_SIGNED_TOKEN_LENGTH = 4096;
+
+/** Arguments that would name a URL rather than a blob. See {@link parseAttachmentRequest}. */
+const URL_SHAPED_ARGUMENTS = ["url", "preview_url", "blob_url", "attachment_url", "src"];
+
+/**
+ * An attachment to read back, with every component already validated: the
+ * client's {@link AttachmentRef} plus the account it belongs to.
+ */
+export interface AttachmentRequest extends AttachmentRef {
+  accountSlug: string;
+}
+
+function requiredString(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${key} is required and must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+/**
+ * Validate one opaque signed token destined for a URL path segment.
+ *
+ * @throws Error naming the argument — these surface verbatim to the model.
+ */
+function validateSignedToken(value: string, key: string): string {
+  if (value.length > MAX_SIGNED_TOKEN_LENGTH) {
+    throw new Error(`${key} is too long to be a signed id`);
+  }
+  if (value === "." || value === "..") {
+    throw new Error(`${key} must be a signed id, not a path`);
+  }
+  if (!SIGNED_TOKEN_PATTERN.test(value)) {
+    throw new Error(
+      `${key} contains characters that are not part of a signed id. ` +
+        `Pass the 'signed_id' (or 'preview_variation') exactly as fizzy_get_card ` +
+        `reported it — never a URL or a file path.`
+    );
+  }
+  return value;
+}
+
+/**
+ * Validate the download filename.
+ *
+ * Only ever used as the last path segment, where ActiveStorage treats it as
+ * decoration for the Content-Disposition header rather than as part of the
+ * lookup — but it is still caller-controlled text spliced into a path, so it
+ * has to be a single segment. `/`, `\` and a `..` segment are rejected outright
+ * rather than escaped away, so a traversal attempt fails loudly instead of
+ * silently fetching something else.
+ */
+function validateAttachmentFilename(value: string): string {
+  if (value.length > 255) {
+    throw new Error("filename is too long");
+  }
+  if (value.includes("/") || value.includes("\\")) {
+    throw new Error(
+      "filename must be a single file name, not a path — it cannot contain / or \\"
+    );
+  }
+  if (value === "." || value === "..") {
+    throw new Error("filename must be a file name, not a path segment");
+  }
+  // Escaped, not written literally: a raw NUL in source is invisible in review.
+  if (/[\x00-\x1f\x7f]/.test(value)) {
+    throw new Error("filename contains control characters");
+  }
+  return value;
+}
+
+/**
+ * Validate the account slug this attachment is scoped to.
+ *
+ * Narrower than the slug handling elsewhere in the client, which only strips a
+ * leading `/`. This path builds a URL that is fetched with the bearer token
+ * attached and whose response is streamed back to the model, so the slug is
+ * pinned to a single path segment here rather than trusted.
+ */
+function validateAccountSlug(value: string): string {
+  const slug = value.startsWith("/") ? value.slice(1) : value;
+  if (slug === "" || slug === "." || slug === "..") {
+    throw new Error("account_slug is required and must be an account slug");
+  }
+  if (!/^[A-Za-z0-9._-]+$/.test(slug)) {
+    throw new Error(
+      "account_slug must be an account slug such as '1234567', not a path or URL"
+    );
+  }
+  return slug;
+}
+
+/**
+ * Resolve the arguments of `fizzy_get_attachment` into a validated request.
+ *
+ * **The tool never accepts a URL.** A caller-supplied URL fetched with the
+ * user's Fizzy token attached is a server-side request forgery with a
+ * credential on it, so the address is rebuilt server-side from a signed blob id
+ * instead. A URL-shaped argument is rejected explicitly rather than ignored:
+ * the Zod path would silently strip it and the Workers path would silently
+ * carry it, and in both cases a model that thinks it asked for one URL and
+ * quietly got another is worse off than one that gets an error saying so.
+ *
+ * @throws Error with a message naming the argument at fault — these surface
+ * verbatim to the model, so they have to say what to send instead.
+ */
+export function parseAttachmentRequest(
+  args: Record<string, unknown>
+): AttachmentRequest {
+  const supplied = URL_SHAPED_ARGUMENTS.filter((key) => args[key] !== undefined);
+  if (supplied.length > 0) {
+    throw new Error(
+      `fizzy_get_attachment does not take a URL (${supplied.join(", ")}). ` +
+        `Pass the attachment's 'signed_id' and 'filename' — from fizzy_get_card or ` +
+        `fizzy_get_card_comments with include_attachments=true — and the address is ` +
+        `rebuilt server-side.`
+    );
+  }
+
+  const accountSlug = validateAccountSlug(requiredString(args, "account_slug"));
+  const signedId = validateSignedToken(requiredString(args, "signed_id"), "signed_id");
+  const filename = validateAttachmentFilename(requiredString(args, "filename"));
+
+  const rawVariation = args.variation;
+  let variation: string | undefined;
+  if (rawVariation !== undefined && rawVariation !== null) {
+    if (typeof rawVariation !== "string") {
+      throw new Error("variation must be a string");
+    }
+    const trimmed = rawVariation.trim();
+    if (trimmed !== "") {
+      variation = validateSignedToken(trimmed, "variation");
+    }
+  }
+
+  return { accountSlug, signedId, filename, variation };
 }

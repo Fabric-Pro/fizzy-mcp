@@ -201,9 +201,31 @@ export const getCardsSchema = z.object({
 });
 
 
+// Shared opt-in flag for the structured attachment metadata that
+// fizzy_get_card and fizzy_get_card_comments can add to their responses.
+//
+// Opt-in rather than default-on, deliberately: this server runs in production
+// and is published to npm, and every existing caller's parsing of these two
+// responses has to keep working byte for byte. Omitting the flag produces
+// exactly the response the tool returned before it existed. The steering that
+// gets a model to pass it lives in the tool descriptions instead.
+export const includeAttachmentsSchema = z
+  .boolean()
+  .optional()
+  .describe(
+    "Set true to add an 'attachments' array parsed out of the rich-text HTML: each " +
+    "file's filename, content_type, byte_size, width, height, signed_id, url and " +
+    "preview_url. Attachments are otherwise visible only as raw " +
+    "<action-text-attachment> markup inside the HTML, and not at all in the plain-text " +
+    "rendering. Pass the returned signed_id and filename to fizzy_get_attachment to " +
+    "actually see an image. Omitting this parameter (the default) leaves the response " +
+    "exactly as it was before this option existed."
+  );
+
 export const getCardSchema = z.object({
   account_slug: accountSlugSchema,
   card_id: cardNumberSchema,
+  include_attachments: includeAttachmentsSchema,
 });
 
 export const createCardSchema = z.object({
@@ -317,6 +339,7 @@ const commentCardSelectorBase = z.object({
 
 export const getCardCommentsSchema = commentCardSelectorBase.extend({
   fields: fieldsSchema,
+  include_attachments: includeAttachmentsSchema,
 });
 
 export const createCommentSchema = commentCardSelectorBase.extend({
@@ -638,3 +661,33 @@ export const uploadFileSchema = z
         "falling back to application/octet-stream."
       ),
   });
+
+// Reading an attachment back.
+//
+// There is deliberately no `url` parameter, and never will be: fetching a
+// caller-supplied URL with the user's Fizzy token attached would be a
+// server-side request forgery carrying a credential. The tool takes the blob's
+// signed id and rebuilds the address itself. `parseAttachmentRequest` in
+// utils/attachments.ts rejects a URL-shaped argument outright and validates
+// each token before it reaches a path — that layer, not this one, is the
+// enforcement point, because the Cloudflare transport dispatches raw arguments
+// without running Zod at all.
+export const getAttachmentSchema = z.object({
+  account_slug: accountSlugSchema,
+  signed_id: z.string().describe(
+    "The attachment's ActiveStorage signed id, exactly as reported in the 'signed_id' " +
+    "field of fizzy_get_card or fizzy_get_card_comments with include_attachments=true. " +
+    "Not a URL and not a file path."
+  ),
+  filename: z.string().describe(
+    "The attachment's filename, from the same 'filename' field, e.g. 'screenshot.png'. " +
+    "A single file name — anything containing a path separator is rejected."
+  ),
+  variation: z.string().optional().describe(
+    "The attachment's 'preview_variation' token, to fetch the resized preview instead " +
+    "of the full-resolution original. Strongly preferred for screenshots and photos: " +
+    "the preview is a fraction of the bytes at the resolution a model can actually " +
+    "read, and a large original is refused outright. Omit only when the attachment " +
+    "reported no preview_variation, or when full resolution is genuinely needed."
+  ),
+});
