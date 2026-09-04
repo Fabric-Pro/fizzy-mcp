@@ -158,6 +158,26 @@ export class FizzyParseError extends FizzyError {
 }
 
 /**
+ * An attachment is larger than the caller asked to read.
+ *
+ * A distinct type rather than a plain Error because the tool layer answers it
+ * with advice the client has no business knowing — that the same attachment can
+ * usually be re-requested as its much smaller preview variant — and matching on
+ * a message string to decide that would be fragile.
+ */
+export class FizzyAttachmentTooLargeError extends FizzyError {
+  constructor(
+    message: string,
+    public readonly maxBytes: number,
+    /** Undefined when the server declared no size and the read hit the cap. */
+    public readonly byteSize?: number
+  ) {
+    super(message, "ATTACHMENT_TOO_LARGE");
+    this.name = "FizzyAttachmentTooLargeError";
+  }
+}
+
+/**
  * Create appropriate error from HTTP status code
  */
 export function createAPIError(

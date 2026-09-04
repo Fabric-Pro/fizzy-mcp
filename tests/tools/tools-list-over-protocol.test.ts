@@ -58,6 +58,7 @@ describe("tools/list over a real MCP connection", () => {
       "card_id",
       "card_number",
       "fields",
+      "include_attachments",
     ]);
   });
 

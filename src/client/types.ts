@@ -317,3 +317,48 @@ export interface FileUpload {
   filename: string;
   contentType: string;
 }
+
+/**
+ * Which blob to read back, named by signed id rather than by URL.
+ *
+ * Never a URL. The address is rebuilt from these parts inside the client, so a
+ * caller cannot steer the request that carries the Fizzy bearer token — see
+ * `parseAttachmentRequest` in utils/attachments.ts, which validates every part
+ * before one of these is constructed.
+ */
+export interface AttachmentRef {
+  /** ActiveStorage signed id of the blob, purpose "blob_id". */
+  signedId: string;
+  /** Single path segment; ActiveStorage uses it only for Content-Disposition. */
+  filename: string;
+  /**
+   * Signed ActiveStorage variation key. Present to fetch the resized
+   * representation (the preview) rather than the full-resolution original.
+   */
+  variation?: string;
+}
+
+/** How much of an attachment to read, and how much of it to tolerate. */
+export interface FetchAttachmentOptions {
+  /** Hard cap on the bytes read. Exceeding it throws rather than truncating. */
+  maxBytes: number;
+  /**
+   * Whether the body is worth downloading, given the type the server reports.
+   * Returning false leaves `bytes` unset and cancels the body — the difference
+   * between reporting that a 40 MB archive is attached and downloading it.
+   */
+  shouldReadBody?: (contentType: string) => boolean;
+}
+
+/** An attachment as read back from storage. */
+export interface FetchedAttachment {
+  /** The final response's media type, parameters stripped, lowercased. */
+  contentType: string;
+  /** Unset when `shouldReadBody` declined this type. */
+  bytes?: Uint8Array;
+  /**
+   * Size in bytes: the length actually read, or the declared Content-Length
+   * when the body was skipped. Unset when neither is known.
+   */
+  byteSize?: number;
+}

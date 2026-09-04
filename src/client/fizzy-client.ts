@@ -32,9 +32,14 @@ import type {
   DirectUploadBlobRequest,
   FizzyDirectUpload,
   FileUpload,
+  AttachmentRef,
+  FetchAttachmentOptions,
+  FetchedAttachment,
 } from "./types.js";
 import {
   createAPIError,
+  FizzyAttachmentTooLargeError,
+  FizzyAuthError,
   FizzyNetworkError,
   FizzyTimeoutError,
   FizzyParseError,
@@ -112,6 +117,18 @@ export class FizzyClient {
           maxEntryBytes: config.cacheMaxEntryBytes,
         })
       : null;
+  }
+
+  /**
+   * The API origin this client is configured against.
+   *
+   * Exposed because the rich-text fields the tools return carry
+   * account-scoped *paths*, and turning those into usable URLs must resolve
+   * against the configured host rather than a hardcoded one — a self-hosted or
+   * staging Fizzy has to resolve against itself.
+   */
+  getBaseUrl(): string {
+    return this.baseUrl;
   }
 
   /**
@@ -1566,5 +1583,274 @@ export class FizzyClient {
     );
 
     return upload;
+  }
+
+  // ============ Attachments (reading a blob back) ============
+
+  /**
+   * Hard stop on the redirect chain out of ActiveStorage.
+   *
+   * One hop is what the service actually does today (API → storage). The extra
+   * headroom covers a storage backend that redirects once more of its own
+   * accord, while still turning a redirect loop into an error rather than an
+   * unbounded request loop — the same reasoning as MAX_AGGREGATED_PAGES.
+   */
+  private static readonly MAX_ATTACHMENT_REDIRECTS = 4;
+
+  /**
+   * Build the ActiveStorage path for a blob, or for one of its representations.
+   *
+   * Every component is interpolated, never concatenated from caller-supplied
+   * text: `parseAttachmentRequest` has already pinned each of them to a single
+   * path segment, and the filename is percent-encoded on top of that because
+   * ActiveStorage treats it as decoration and a legal name can still contain
+   * characters that mean something in a URL.
+   */
+  private attachmentPath(slug: string, ref: AttachmentRef): string {
+    const filename = encodeURIComponent(ref.filename);
+    return ref.variation
+      ? `/${slug}/rails/active_storage/representations/redirect/${ref.signedId}/${ref.variation}/${filename}`
+      : `/${slug}/rails/active_storage/blobs/redirect/${ref.signedId}/${filename}`;
+  }
+
+  /**
+   * Where a 3xx points, resolved and vetted, or null when this is not a redirect.
+   *
+   * The `Location` of a response is not trusted input just because the response
+   * came from Fizzy: it decides the URL this client fetches next, so it is
+   * pinned to http/https here. A `file:`, `data:` or `blob:` target would
+   * otherwise be handed straight to `fetch`.
+   */
+  private resolveAttachmentRedirect(response: Response, from: string): string | null {
+    const status = response.status;
+    if (status !== 301 && status !== 302 && status !== 303 && status !== 307 && status !== 308) {
+      return null;
+    }
+
+    const location = response.headers?.get?.("Location");
+    if (!location) {
+      throw new FizzyParseError(
+        `Attachment request returned ${status} with no Location header`
+      );
+    }
+
+    let next: URL;
+    try {
+      next = new URL(location, from);
+    } catch {
+      throw new FizzyParseError("Attachment redirect Location is not a valid URL");
+    }
+    if (next.protocol !== "http:" && next.protocol !== "https:") {
+      throw new FizzyParseError(
+        `Refusing to follow an attachment redirect to ${next.protocol} — only http and https are followed`
+      );
+    }
+
+    // Unauthenticated reads of a blob redirect land on the sign-in page rather
+    // than a 401, so without this the caller gets an HTML login form typed as
+    // their attachment. Reported as the auth failure it actually is.
+    if (next.origin === this.originOfBaseUrl() && /^\/session(\/|$)/.test(next.pathname)) {
+      throw new FizzyAuthError(
+        "Authentication failed: the attachment request was redirected to sign-in. " +
+          "Check the access token and that it can read this account."
+      );
+    }
+
+    return next.toString();
+  }
+
+  /** The configured base URL's origin, or "" when it is not parseable. */
+  private originOfBaseUrl(): string {
+    try {
+      return new URL(this.baseUrl).origin;
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Read a response body, refusing rather than truncating past `maxBytes`.
+   *
+   * `Content-Length` is checked first so an oversized attachment costs nothing
+   * to reject, then the stream is read incrementally so a response that
+   * declares no length — or lies about it — is still bounded. `arrayBuffer()`
+   * is the fallback for partial mocks that define no `body`, matching the
+   * capability checks the JSON path already makes.
+   */
+  private async readBoundedBody(
+    response: Response,
+    maxBytes: number,
+    describe: string
+  ): Promise<Uint8Array> {
+    const declared = Number(response.headers?.get?.("Content-Length") ?? Number.NaN);
+    if (Number.isSafeInteger(declared) && declared > maxBytes) {
+      throw new FizzyAttachmentTooLargeError(
+        `${describe} is ${declared} bytes, over the ${maxBytes}-byte limit for an inlined attachment`,
+        maxBytes,
+        declared
+      );
+    }
+
+    const body = response.body;
+    if (!body || typeof body.getReader !== "function") {
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength > maxBytes) {
+        throw new FizzyAttachmentTooLargeError(
+          `${describe} is ${buffer.byteLength} bytes, over the ${maxBytes}-byte limit for an inlined attachment`,
+          maxBytes,
+          buffer.byteLength
+        );
+      }
+      return new Uint8Array(buffer);
+    }
+
+    const reader = body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        total += value.byteLength;
+        if (total > maxBytes) {
+          throw new FizzyAttachmentTooLargeError(
+            `${describe} is over the ${maxBytes}-byte limit for an inlined attachment`,
+            maxBytes
+          );
+        }
+        chunks.push(value);
+      }
+    } finally {
+      // Releases the connection on the throw path; a no-op once the stream ended.
+      await reader.cancel().catch(() => {});
+    }
+
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  }
+
+  /**
+   * Read an attachment back, following ActiveStorage's redirect to storage by
+   * hand.
+   *
+   * **The Fizzy bearer token must never reach the storage host.** The redirect
+   * is therefore followed manually — `redirect: "manual"` on every hop — and
+   * the `Authorization` header is attached only while the URL is still on the
+   * configured Fizzy origin. Auto-following is not an option: whether a runtime
+   * strips credentials on a cross-origin redirect is runtime-dependent, and
+   * this code ships on both Node (undici) and Cloudflare Workers. The same
+   * invariant governs the upload direction — see `putBlobToStorage`, which
+   * sends only the headers storage signed.
+   *
+   * Deciding per hop rather than assuming exactly two also keeps the
+   * representation endpoint working: a variant that is not yet processed can
+   * redirect within the Fizzy origin first, and that hop *does* need the token.
+   *
+   * No retry, for the same reason `putBlobToStorage` has none: replaying
+   * against a signed storage URL that may since have expired turns one clear
+   * error into a slower, less obvious one.
+   *
+   * The storage URL itself is deliberately not returned. It is a signed,
+   * time-limited grant to download the blob without any credential at all —
+   * handing it back to the model would put a bearer-equivalent secret into a
+   * transcript and let anything downstream fetch outside these checks.
+   */
+  async fetchAttachment(
+    accountSlug: string,
+    ref: AttachmentRef,
+    options: FetchAttachmentOptions
+  ): Promise<FetchedAttachment> {
+    const slug = this.normalizeSlug(accountSlug);
+    const baseOrigin = this.originOfBaseUrl();
+    let url = `${this.baseUrl}${this.attachmentPath(slug, ref)}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      for (let hop = 0; hop <= FizzyClient.MAX_ATTACHMENT_REDIRECTS; hop++) {
+        // The whole point of the manual walk: credentials are attached by
+        // origin, so they stop at the boundary between Fizzy and storage.
+        const onFizzyOrigin = baseOrigin !== "" && this.isSameOrigin(url, baseOrigin);
+        const headers: Record<string, string> = { Accept: "*/*" };
+        if (onFizzyOrigin) {
+          headers.Authorization = `Bearer ${this.accessToken}`;
+        }
+
+        this.log.debug("Fetching attachment", {
+          hop,
+          authenticated: onFizzyOrigin,
+        });
+
+        const response = await fetch(url, {
+          method: "GET",
+          headers,
+          redirect: "manual",
+          signal: controller.signal,
+        });
+
+        const next = this.resolveAttachmentRedirect(response, url);
+        if (next !== null) {
+          url = next;
+          continue;
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          throw createAPIError(response.status, response.statusText, errorText);
+        }
+
+        const contentType = (response.headers?.get?.("Content-Type") ?? "")
+          .split(";")[0]
+          .trim()
+          .toLowerCase();
+        const declared = Number(response.headers?.get?.("Content-Length") ?? Number.NaN);
+        const byteSize = Number.isSafeInteger(declared) && declared >= 0 ? declared : undefined;
+
+        if (options.shouldReadBody && !options.shouldReadBody(contentType)) {
+          // Nothing here wants the bytes, so don't pay for them.
+          await response.body?.cancel?.().catch(() => {});
+          return { contentType, byteSize };
+        }
+
+        const bytes = await this.readBoundedBody(response, options.maxBytes, ref.filename);
+        return { contentType, bytes, byteSize: bytes.length };
+      }
+
+      throw new FizzyNetworkError(
+        `Attachment request redirected more than ${FizzyClient.MAX_ATTACHMENT_REDIRECTS} times`
+      );
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new FizzyTimeoutError(
+          `Attachment fetch timed out after ${this.timeout}ms`,
+          this.timeout
+        );
+      }
+      if (error instanceof TypeError && error.message.includes("fetch")) {
+        throw new FizzyNetworkError(
+          `Network error while fetching attachment: ${error.message}`,
+          error
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /** Whether `url` is on `origin`; an unparseable URL is never same-origin. */
+  private isSameOrigin(url: string, origin: string): boolean {
+    try {
+      return new URL(url).origin === origin;
+    } catch {
+      return false;
+    }
   }
 }
