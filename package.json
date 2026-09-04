@@ -65,7 +65,7 @@
     "@vitest/coverage-v8": "^2.1.0",
     "dotenv": "^17.2.3",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0",
+    "typescript": "^7.0.2",
     "vitest": "^2.1.0",
     "wrangler": "^3.99.0"
   },
