@@ -437,8 +437,15 @@ describe("SessionManager", () => {
         );
       }
 
-      // All operations should complete without error
+      // The await is load-bearing: without it this assertion never ran at all,
+      // which is how it sat here silently passing until vitest 5 began reporting
+      // un-awaited assertions.
       await expect(Promise.all(operations)).resolves.not.toThrow();
+
+      // Fulfilment alone says little, since Promise.all resolves to an array of
+      // undefined either way. What the test is named for is that 100 interleaved
+      // create/get/delete cycles leave nothing behind.
+      expect(manager.size).toBe(0);
     });
 
     it("should maintain consistency under simulated load", () => {
