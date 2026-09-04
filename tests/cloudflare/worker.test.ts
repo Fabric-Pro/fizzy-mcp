@@ -12,6 +12,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { validateSecurity } from "../../src/cloudflare/security.js";
+import type { Env as WorkerEnv } from "../../src/cloudflare/types.js";
 
 // Mock types for testing (we can't import actual Cloudflare types in Node.js tests)
 interface MockEnv {
@@ -27,53 +29,38 @@ interface MockEnv {
   };
 }
 
-// Import the security validation logic inline for testing
-// (In production, this would be imported from the worker)
-function validateSecurity(request: Request, env: MockEnv): {
+// The Worker's real origin validation, imported from src/cloudflare/security.ts.
+//
+// The suites below that pass MCP_AUTH_TOKEN use validateSecurityWithProposedAuth
+// instead: src/cloudflare/ never reads MCP_AUTH_TOKEN, so the Worker performs no
+// client authentication and those cases describe behaviour that does not exist
+// yet. They are kept as the specification for that gap, not as coverage of it.
+// Tracked in https://github.com/Fabric-Pro/fizzy-mcp/issues/64.
+function validateSecurityWithProposedAuth(request: Request, env: MockEnv): {
   allowed: boolean;
   statusCode?: number;
   error?: string;
   corsOrigin?: string;
 } {
-  const origin = request.headers.get("Origin");
-  
-  const allowedOriginsStr = env.MCP_ALLOWED_ORIGINS || "*";
-  const allowedOrigins = allowedOriginsStr === "*" 
-    ? ["*"] 
-    : allowedOriginsStr.split(",").map(o => o.trim());
-
-  if (origin && !allowedOrigins.includes("*")) {
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (allowed === origin) return true;
-      try {
-        const originUrl = new URL(origin);
-        const allowedUrl = new URL(allowed);
-        return originUrl.hostname === allowedUrl.hostname && 
-               originUrl.protocol === allowedUrl.protocol;
-      } catch {
-        return false;
-      }
-    });
-
-    if (!isAllowed) {
-      return {
-        allowed: false,
-        statusCode: 403,
-        error: "Origin not allowed",
-        corsOrigin: allowedOrigins[0],
-      };
-    }
+  const originResult = validateSecurity(request, env as unknown as WorkerEnv);
+  if (!originResult.allowed) {
+    return originResult;
   }
 
   if (env.MCP_AUTH_TOKEN) {
     const authHeader = request.headers.get("Authorization");
-    
+    // Auth failures keep the CORS origin the origin check already decided, so
+    // this specification never describes a response more permissive than the
+    // deployed policy (echoing a caller origin under a wildcard allowlist would
+    // pair Access-Control-Allow-Credentials with an unvetted origin).
+    const corsOrigin = originResult.corsOrigin;
+
     if (!authHeader) {
       return {
         allowed: false,
         statusCode: 401,
         error: "Client authentication required",
-        corsOrigin: origin || "*",
+        corsOrigin,
       };
     }
 
@@ -82,31 +69,21 @@ function validateSecurity(request: Request, env: MockEnv): {
         allowed: false,
         statusCode: 401,
         error: "Invalid authentication format. Expected: Bearer <token>",
-        corsOrigin: origin || "*",
+        corsOrigin,
       };
     }
 
-    const token = authHeader.slice(7);
-    if (token !== env.MCP_AUTH_TOKEN) {
+    if (authHeader.slice(7) !== env.MCP_AUTH_TOKEN) {
       return {
         allowed: false,
         statusCode: 401,
         error: "Invalid authentication token",
-        corsOrigin: origin || "*",
+        corsOrigin,
       };
     }
   }
 
-  let corsOrigin: string;
-  if (allowedOrigins.includes("*")) {
-    corsOrigin = "*";
-  } else if (origin && allowedOrigins.includes(origin)) {
-    corsOrigin = origin;
-  } else {
-    corsOrigin = allowedOrigins[0] || "*";
-  }
-
-  return { allowed: true, corsOrigin };
+  return originResult;
 }
 
 describe("Worker Security Validation", () => {
@@ -179,7 +156,19 @@ describe("Worker Security Validation", () => {
       expect(result.corsOrigin).toBe("https://second.com");
     });
 
-    it("should match localhost with different ports", () => {
+    it("should match any localhost port when the entry has no port", () => {
+      const request = new Request("https://example.com/mcp", {
+        headers: { Origin: "http://localhost:3000" },
+      });
+      const env = { ...baseEnv, MCP_ALLOWED_ORIGINS: "http://localhost" };
+      
+      const result = validateSecurity(request, env);
+      
+      expect(result.allowed).toBe(true);
+      expect(result.corsOrigin).toBe("http://localhost:3000");
+    });
+
+    it("should reject other localhost ports when the entry pins a port", () => {
       const request = new Request("https://example.com/mcp", {
         headers: { Origin: "http://localhost:3000" },
       });
@@ -187,7 +176,20 @@ describe("Worker Security Validation", () => {
       
       const result = validateSecurity(request, env);
       
-      expect(result.allowed).toBe(true);
+      expect(result.allowed).toBe(false);
+      expect(result.statusCode).toBe(403);
+    });
+
+    it("should reject another port on an allowed public host", () => {
+      const request = new Request("https://example.com/mcp", {
+        headers: { Origin: "https://myapp.com:8443" },
+      });
+      const env = { ...baseEnv, MCP_ALLOWED_ORIGINS: "https://myapp.com" };
+      
+      const result = validateSecurity(request, env);
+      
+      expect(result.allowed).toBe(false);
+      expect(result.statusCode).toBe(403);
     });
   });
 
@@ -196,7 +198,7 @@ describe("Worker Security Validation", () => {
       const request = new Request("https://example.com/mcp");
       const env = { ...baseEnv };
       
-      const result = validateSecurity(request, env);
+      const result = validateSecurityWithProposedAuth(request, env);
       
       expect(result.allowed).toBe(true);
     });
@@ -205,7 +207,7 @@ describe("Worker Security Validation", () => {
       const request = new Request("https://example.com/mcp");
       const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
       
-      const result = validateSecurity(request, env);
+      const result = validateSecurityWithProposedAuth(request, env);
       
       expect(result.allowed).toBe(false);
       expect(result.statusCode).toBe(401);
@@ -218,7 +220,7 @@ describe("Worker Security Validation", () => {
       });
       const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
       
-      const result = validateSecurity(request, env);
+      const result = validateSecurityWithProposedAuth(request, env);
       
       expect(result.allowed).toBe(false);
       expect(result.statusCode).toBe(401);
@@ -231,7 +233,7 @@ describe("Worker Security Validation", () => {
       });
       const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
       
-      const result = validateSecurity(request, env);
+      const result = validateSecurityWithProposedAuth(request, env);
       
       expect(result.allowed).toBe(false);
       expect(result.statusCode).toBe(401);
@@ -244,7 +246,7 @@ describe("Worker Security Validation", () => {
       });
       const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
       
-      const result = validateSecurity(request, env);
+      const result = validateSecurityWithProposedAuth(request, env);
       
       expect(result.allowed).toBe(true);
     });
@@ -264,7 +266,7 @@ describe("Worker Security Validation", () => {
         MCP_AUTH_TOKEN: "secret",
       };
       
-      const result = validateSecurity(request, env);
+      const result = validateSecurityWithProposedAuth(request, env);
       
       expect(result.allowed).toBe(true);
       expect(result.corsOrigin).toBe("https://allowed.com");
@@ -283,7 +285,7 @@ describe("Worker Security Validation", () => {
         MCP_AUTH_TOKEN: "secret",
       };
       
-      const result = validateSecurity(request, env);
+      const result = validateSecurityWithProposedAuth(request, env);
       
       expect(result.allowed).toBe(false);
       expect(result.statusCode).toBe(403);
@@ -302,7 +304,7 @@ describe("Worker Security Validation", () => {
         MCP_AUTH_TOKEN: "secret",
       };
       
-      const result = validateSecurity(request, env);
+      const result = validateSecurityWithProposedAuth(request, env);
       
       expect(result.allowed).toBe(false);
       expect(result.statusCode).toBe(401);

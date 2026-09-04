@@ -28,6 +28,7 @@
     "src/utils/base64.ts",
     "src/utils/file-source.ts",
     "src/utils/md5.ts",
+    "src/utils/origin.ts",
     "src/utils/projections.ts",
     "src/utils/search-terms.ts"
   ],

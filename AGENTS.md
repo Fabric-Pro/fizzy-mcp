@@ -84,7 +84,7 @@ npm run start:http    # Streamable HTTP transport (port 3000)
 - `FIZZY_ACCESS_TOKEN` — required for stdio transport
 - `FIZZY_BASE_URL` — API base URL (default: `https://app.fizzy.do`)
 - `MCP_TRANSPORT` — default transport (default: `stdio`)
-- `MCP_ALLOWED_ORIGINS` — CORS origins (default: `*`)
+- `MCP_ALLOWED_ORIGINS` — CORS origins (default: `*`); matched exactly, except that a portless loopback entry matches any port on the same scheme and hostname (`utils/origin.ts`)
 - `MCP_AUTH_TOKEN` — optional client bearer token
 - `LOG_LEVEL` — `debug`/`info`/`warn`/`error` (default: `info`)
 

@@ -463,6 +463,11 @@ When using HTTP or SSE transports, additional security options are available:
 | `MCP_AUTH_TOKEN` | No | — | Optional bearer token for Client Authentication (authenticates MCP clients connecting to this server) |
 | `MCP_BIND_ALL_INTERFACES` | No | `false` | Set to `true` to bind to 0.0.0.0 instead of localhost |
 
+Origins are matched exactly. The one convenience is loopback: an entry written
+without a port (`http://localhost`) matches any port on that same scheme and
+hostname, while an entry that pins a port (`http://localhost:3000`) matches only
+that port — and never a different loopback hostname or scheme.
+
 **Multi-User Support:**
 
 SSE and HTTP transports support multiple users simultaneously:

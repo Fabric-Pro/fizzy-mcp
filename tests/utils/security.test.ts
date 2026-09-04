@@ -125,6 +125,28 @@ describe("Security Utilities", () => {
         
         expect(result.allowed).toBe(true);
       });
+
+      it("should reject other localhost ports when a port is configured", async () => {
+        const req = createMockRequest("GET", { origin: "http://localhost:9999" });
+        const options: SecurityOptions = {
+          allowedOrigins: ["http://localhost:3000"],
+        };
+        const result = await validateRequestSecurity(req, options, 3000);
+        
+        expect(result.allowed).toBe(false);
+        expect(result.statusCode).toBe(403);
+      });
+
+      it("should reject other loopback variants when localhost is configured", async () => {
+        const req = createMockRequest("GET", { origin: "https://127.0.0.1:8080" });
+        const options: SecurityOptions = {
+          allowedOrigins: ["http://localhost"],
+        };
+        const result = await validateRequestSecurity(req, options, 3000);
+        
+        expect(result.allowed).toBe(false);
+        expect(result.statusCode).toBe(403);
+      });
     });
 
     describe("Client Authentication", () => {
