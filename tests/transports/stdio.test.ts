@@ -3,9 +3,11 @@ import { FizzyClient } from "../../src/client/fizzy-client.js";
 
 // Mock the SDK transports
 vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
-  StdioServerTransport: vi.fn().mockImplementation(() => ({
-    close: vi.fn().mockResolvedValue(undefined),
-  })),
+  StdioServerTransport: vi.fn().mockImplementation(function () {
+    return {
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
 }));
 
 // Mock the server - use inline function to avoid hoisting issues

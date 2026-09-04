@@ -9,9 +9,11 @@ import http from "node:http";
 
 // Mock FizzyClient to avoid actual API calls
 vi.mock("../../src/client/fizzy-client.js", () => ({
-  FizzyClient: vi.fn().mockImplementation(() => ({
-    // Mock client methods as needed
-  })),
+  FizzyClient: vi.fn().mockImplementation(function () {
+    return {
+      // Mock client methods as needed
+    };
+  }),
 }));
 
 // Mock the server to avoid actual MCP server creation
@@ -23,7 +25,7 @@ vi.mock("../../src/server.js", () => ({
 
 // Mock StreamableHTTPServerTransport
 vi.mock("@modelcontextprotocol/sdk/server/streamableHttp.js", () => ({
-  StreamableHTTPServerTransport: vi.fn().mockImplementation((options) => {
+  StreamableHTTPServerTransport: vi.fn().mockImplementation(function (options) {
     const sessionId = crypto.randomUUID();
     // Simulate session initialization callback
     setTimeout(() => {
