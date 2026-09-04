@@ -1598,6 +1598,14 @@ export class FizzyClient {
   private static readonly MAX_ATTACHMENT_REDIRECTS = 4;
 
   /**
+   * How much of a failed attachment response is read to build its error message.
+   *
+   * Enough for a Rails error page's useful opening; small enough that an
+   * unbounded body on the least trustworthy hop in the chain costs nothing.
+   */
+  private static readonly MAX_ATTACHMENT_ERROR_BYTES = 8 * 1024;
+
+  /**
    * Build the ActiveStorage path for a blob, or for one of its representations.
    *
    * Every component is interpolated, never concatenated from caller-supplied
@@ -1677,6 +1685,56 @@ export class FizzyClient {
    * is the fallback for partial mocks that define no `body`, matching the
    * capability checks the JSON path already makes.
    */
+  /**
+   * Read at most `limit` bytes of a body as text, discarding the remainder.
+   *
+   * Exists because the *error* path would otherwise be the one place the
+   * attachment size cap does not apply. `readBoundedBody` guards a successful
+   * response, but a storage host answering 500 with a chunked body — no
+   * `Content-Length` needed — would have been buffered whole by `.text()` just
+   * to build an error message, defeating the cap on precisely the response
+   * least worth trusting.
+   *
+   * Never throws: a failure reading an error body must not replace the HTTP
+   * error being reported with a less informative one.
+   */
+  private async readTruncatedText(response: Response, limit: number): Promise<string> {
+    const body = response.body;
+    if (!body || typeof body.getReader !== "function") {
+      // No stream to bound — mocked and older-runtime responses only.
+      const text = await response.text().catch(() => "");
+      return text.length > limit ? `${text.slice(0, limit)}…` : text;
+    }
+
+    const reader = body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      while (total < limit) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        const remaining = limit - total;
+        const slice = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+        chunks.push(slice);
+        total += slice.byteLength;
+      }
+    } catch {
+      // Fall through with whatever was read.
+    } finally {
+      // Discards the untruncated tail and releases the connection.
+      await reader.cancel().catch(() => {});
+    }
+
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder().decode(bytes);
+  }
+
   private async readBoundedBody(
     response: Response,
     maxBytes: number,
@@ -1795,14 +1853,28 @@ export class FizzyClient {
           signal: controller.signal,
         });
 
-        const next = this.resolveAttachmentRedirect(response, url);
+        let next: string | null;
+        try {
+          next = this.resolveAttachmentRedirect(response, url);
+        } catch (error) {
+          // A rejected redirect still arrived with a body nobody will read.
+          await response.body?.cancel?.().catch(() => {});
+          throw error;
+        }
         if (next !== null) {
+          // Nothing reads a redirect's body, so release the connection rather
+          // than leaving it to the GC — and a 302 carrying a large body then
+          // costs one header round trip instead of its full length.
+          await response.body?.cancel?.().catch(() => {});
           url = next;
           continue;
         }
 
         if (!response.ok) {
-          const errorText = await response.text().catch(() => "");
+          const errorText = await this.readTruncatedText(
+            response,
+            FizzyClient.MAX_ATTACHMENT_ERROR_BYTES
+          );
           throw createAPIError(response.status, response.statusText, errorText);
         }
 

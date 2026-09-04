@@ -327,3 +327,84 @@ describe("fetchAttachment: size and body handling", () => {
     expect(result.contentType).toBe("image/png");
   });
 });
+
+/**
+ * Bodies that nobody wants must not be paid for.
+ *
+ * The success path is bounded by `maxBytes`, but a redirect body and a
+ * non-2xx error body are read on different paths — and those are the hops most
+ * likely to come from a host other than Fizzy. Both are asserted on behaviour:
+ * the stream is cancelled, and only a bounded prefix is ever pulled.
+ */
+describe("fetchAttachment body bounding on non-success paths", () => {
+  /** A stream that reports how much of it was actually consumed. */
+  function countingStream(chunk: Uint8Array, repeats: number) {
+    const state = { pulled: 0, cancelled: false };
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (state.pulled >= repeats) {
+          controller.close();
+          return;
+        }
+        state.pulled += 1;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        state.cancelled = true;
+      },
+    });
+    return { stream, state };
+  }
+
+  it("cancels a redirect's body instead of leaving it dangling", async () => {
+    const { stream, state } = countingStream(new Uint8Array(1024), 512);
+    stubFetch((_call, index) => {
+      if (index === 0) {
+        return new Response(stream, {
+          status: 302,
+          headers: { Location: STORAGE_URL },
+        });
+      }
+      return binaryResponse(PNG_BYTES);
+    });
+
+    const result = await client().fetchAttachment(ACCOUNT, REF, { maxBytes: 4096 });
+
+    expect(result.bytes).toEqual(PNG_BYTES);
+    expect(state.cancelled).toBe(true);
+  });
+
+  it("cancels the body of a redirect it refuses to follow", async () => {
+    // A sign-in redirect is rejected inside the resolver rather than followed,
+    // so its body is released on the throw path rather than the continue path.
+    const { stream, state } = countingStream(new Uint8Array(1024), 512);
+    stubFetch(
+      () =>
+        new Response(stream, {
+          status: 302,
+          headers: { Location: `${BASE_URL}/session/new` },
+        })
+    );
+
+    await expect(
+      client().fetchAttachment(ACCOUNT, REF, { maxBytes: 4096 })
+    ).rejects.toBeInstanceOf(FizzyAuthError);
+
+    expect(state.cancelled).toBe(true);
+  });
+
+  it("reads only a bounded prefix of an unbounded error body", async () => {
+    // 8 MB available, no Content-Length: `.text()` would have buffered all of
+    // it just to build the error message, past the 4 KB cap on the success path.
+    const { stream, state } = countingStream(new Uint8Array(64 * 1024), 128);
+    stubFetch(() => new Response(stream, { status: 500, statusText: "Server Error" }));
+
+    await expect(
+      client().fetchAttachment(ACCOUNT, REF, { maxBytes: 4096 })
+    ).rejects.toThrow();
+
+    expect(state.cancelled).toBe(true);
+    // A handful of 64 KB chunks at most — not the whole 8 MB.
+    expect(state.pulled).toBeLessThan(8);
+  });
+});
