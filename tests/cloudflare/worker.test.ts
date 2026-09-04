@@ -13,7 +13,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { validateSecurity } from "../../src/cloudflare/security.js";
-import type { Env as WorkerEnv } from "../../src/cloudflare/types.js";
+import { CLIENT_AUTH_HEADER } from "../../src/utils/client-auth.js";
+import { setCorsHeaders, setSecurityHeaders } from "../../src/cloudflare/headers.js";
 
 // Mock types for testing (we can't import actual Cloudflare types in Node.js tests)
 interface MockEnv {
@@ -27,63 +28,6 @@ interface MockEnv {
       fetch: (request: Request) => Promise<Response>;
     };
   };
-}
-
-// The Worker's real origin validation, imported from src/cloudflare/security.ts.
-//
-// The suites below that pass MCP_AUTH_TOKEN use validateSecurityWithProposedAuth
-// instead: src/cloudflare/ never reads MCP_AUTH_TOKEN, so the Worker performs no
-// client authentication and those cases describe behaviour that does not exist
-// yet. They are kept as the specification for that gap, not as coverage of it.
-// Tracked in https://github.com/Fabric-Pro/fizzy-mcp/issues/64.
-function validateSecurityWithProposedAuth(request: Request, env: MockEnv): {
-  allowed: boolean;
-  statusCode?: number;
-  error?: string;
-  corsOrigin?: string;
-} {
-  const originResult = validateSecurity(request, env as unknown as WorkerEnv);
-  if (!originResult.allowed) {
-    return originResult;
-  }
-
-  if (env.MCP_AUTH_TOKEN) {
-    const authHeader = request.headers.get("Authorization");
-    // Auth failures keep the CORS origin the origin check already decided, so
-    // this specification never describes a response more permissive than the
-    // deployed policy (echoing a caller origin under a wildcard allowlist would
-    // pair Access-Control-Allow-Credentials with an unvetted origin).
-    const corsOrigin = originResult.corsOrigin;
-
-    if (!authHeader) {
-      return {
-        allowed: false,
-        statusCode: 401,
-        error: "Client authentication required",
-        corsOrigin,
-      };
-    }
-
-    if (!authHeader.startsWith("Bearer ")) {
-      return {
-        allowed: false,
-        statusCode: 401,
-        error: "Invalid authentication format. Expected: Bearer <token>",
-        corsOrigin,
-      };
-    }
-
-    if (authHeader.slice(7) !== env.MCP_AUTH_TOKEN) {
-      return {
-        allowed: false,
-        statusCode: 401,
-        error: "Invalid authentication token",
-        corsOrigin,
-      };
-    }
-  }
-
-  return originResult;
 }
 
 describe("Worker Security Validation", () => {
@@ -193,61 +137,90 @@ describe("Worker Security Validation", () => {
     });
   });
 
-  describe("Bearer Token Authentication", () => {
-    it("should allow requests without auth when MCP_AUTH_TOKEN not set", () => {
+  describe("Client Authentication", () => {
+    it("should allow requests without a client token when MCP_AUTH_TOKEN is not set", () => {
       const request = new Request("https://example.com/mcp");
       const env = { ...baseEnv };
-      
-      const result = validateSecurityWithProposedAuth(request, env);
-      
+
+      const result = validateSecurity(request, env);
+
       expect(result.allowed).toBe(true);
     });
 
-    it("should require auth when MCP_AUTH_TOKEN is set", () => {
+    it("should require the client token when MCP_AUTH_TOKEN is set", () => {
       const request = new Request("https://example.com/mcp");
       const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
-      
-      const result = validateSecurityWithProposedAuth(request, env);
-      
+
+      const result = validateSecurity(request, env);
+
       expect(result.allowed).toBe(false);
       expect(result.statusCode).toBe(401);
       expect(result.error).toBe("Client authentication required");
     });
 
-    it("should reject invalid auth format", () => {
+    it("should reject an empty client token header", () => {
       const request = new Request("https://example.com/mcp", {
-        headers: { Authorization: "Basic abc123" },
+        headers: { [CLIENT_AUTH_HEADER]: "" },
       });
       const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
-      
-      const result = validateSecurityWithProposedAuth(request, env);
-      
+
+      const result = validateSecurity(request, env);
+
       expect(result.allowed).toBe(false);
       expect(result.statusCode).toBe(401);
-      expect(result.error).toContain("Invalid authentication format");
+      expect(result.error).toBe("Client authentication required");
     });
 
-    it("should reject wrong token", () => {
-      const request = new Request("https://example.com/mcp", {
-        headers: { Authorization: "Bearer wrong-token" },
-      });
-      const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
-      
-      const result = validateSecurityWithProposedAuth(request, env);
-      
-      expect(result.allowed).toBe(false);
-      expect(result.statusCode).toBe(401);
-      expect(result.error).toBe("Invalid authentication token");
-    });
-
-    it("should allow correct token", () => {
+    // The whole point of the dedicated header: Authorization belongs to the
+    // per-user Fizzy token, so a client token sent there is not client auth.
+    it("should reject a client token presented on Authorization", () => {
       const request = new Request("https://example.com/mcp", {
         headers: { Authorization: "Bearer secret" },
       });
       const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
-      
-      const result = validateSecurityWithProposedAuth(request, env);
-      
+
+      const result = validateSecurity(request, env);
+
+      expect(result.allowed).toBe(false);
+      expect(result.statusCode).toBe(401);
+      expect(result.error).toBe("Client authentication required");
+    });
+
+    it("should reject wrong token", () => {
+      const request = new Request("https://example.com/mcp", {
+        headers: { [CLIENT_AUTH_HEADER]: "wrong-token" },
+      });
+      const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
+
+      const result = validateSecurity(request, env);
+
+      expect(result.allowed).toBe(false);
+      expect(result.statusCode).toBe(401);
+      expect(result.error).toBe("Invalid client authentication token");
+    });
+
+    it("should allow correct token", () => {
+      const request = new Request("https://example.com/mcp", {
+        headers: { [CLIENT_AUTH_HEADER]: "secret" },
+      });
+      const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
+
+      const result = validateSecurity(request, env);
+
+      expect(result.allowed).toBe(true);
+    });
+
+    it("should allow a client token alongside a different Fizzy token on Authorization", () => {
+      const request = new Request("https://example.com/mcp", {
+        headers: {
+          [CLIENT_AUTH_HEADER]: "secret",
+          Authorization: "Bearer user-fizzy-pat",
+        },
+      });
+      const env = { ...baseEnv, MCP_AUTH_TOKEN: "secret" };
+
+      const result = validateSecurity(request, env);
+
       expect(result.allowed).toBe(true);
     });
   });
@@ -257,7 +230,7 @@ describe("Worker Security Validation", () => {
       const request = new Request("https://example.com/mcp", {
         headers: {
           Origin: "https://allowed.com",
-          Authorization: "Bearer secret",
+          [CLIENT_AUTH_HEADER]: "secret",
         },
       });
       const env = {
@@ -265,9 +238,9 @@ describe("Worker Security Validation", () => {
         MCP_ALLOWED_ORIGINS: "https://allowed.com",
         MCP_AUTH_TOKEN: "secret",
       };
-      
-      const result = validateSecurityWithProposedAuth(request, env);
-      
+
+      const result = validateSecurity(request, env);
+
       expect(result.allowed).toBe(true);
       expect(result.corsOrigin).toBe("https://allowed.com");
     });
@@ -276,7 +249,7 @@ describe("Worker Security Validation", () => {
       const request = new Request("https://example.com/mcp", {
         headers: {
           Origin: "https://wrong.com",
-          Authorization: "Bearer secret",
+          [CLIENT_AUTH_HEADER]: "secret",
         },
       });
       const env = {
@@ -284,9 +257,9 @@ describe("Worker Security Validation", () => {
         MCP_ALLOWED_ORIGINS: "https://allowed.com",
         MCP_AUTH_TOKEN: "secret",
       };
-      
-      const result = validateSecurityWithProposedAuth(request, env);
-      
+
+      const result = validateSecurity(request, env);
+
       expect(result.allowed).toBe(false);
       expect(result.statusCode).toBe(403);
     });
@@ -295,7 +268,7 @@ describe("Worker Security Validation", () => {
       const request = new Request("https://example.com/mcp", {
         headers: {
           Origin: "https://allowed.com",
-          Authorization: "Bearer wrong",
+          [CLIENT_AUTH_HEADER]: "wrong",
         },
       });
       const env = {
@@ -303,27 +276,38 @@ describe("Worker Security Validation", () => {
         MCP_ALLOWED_ORIGINS: "https://allowed.com",
         MCP_AUTH_TOKEN: "secret",
       };
-      
-      const result = validateSecurityWithProposedAuth(request, env);
-      
+
+      const result = validateSecurity(request, env);
+
       expect(result.allowed).toBe(false);
       expect(result.statusCode).toBe(401);
+    });
+
+    // A 401 without a usable Allow-Origin reads as an opaque network error in
+    // the browser, so the auth failure must carry the same CORS origin the
+    // success path would have returned — and never a more permissive one.
+    it("should return the allowed CORS origin on a 401", () => {
+      const request = new Request("https://example.com/mcp", {
+        headers: {
+          Origin: "https://allowed.com",
+          [CLIENT_AUTH_HEADER]: "wrong",
+        },
+      });
+      const env = {
+        ...baseEnv,
+        MCP_ALLOWED_ORIGINS: "https://allowed.com",
+        MCP_AUTH_TOKEN: "secret",
+      };
+
+      const result = validateSecurity(request, env);
+
+      expect(result.statusCode).toBe(401);
+      expect(result.corsOrigin).toBe("https://allowed.com");
     });
   });
 });
 
 describe("CORS Headers", () => {
-  function setCorsHeaders(headers: Headers, corsOrigin: string): void {
-    headers.set("Access-Control-Allow-Origin", corsOrigin);
-    headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id");
-    headers.set("Access-Control-Expose-Headers", "mcp-session-id");
-    
-    if (corsOrigin !== "*") {
-      headers.set("Access-Control-Allow-Credentials", "true");
-    }
-  }
-
   it("should set all required CORS headers", () => {
     const headers = new Headers();
     setCorsHeaders(headers, "https://example.com");
@@ -331,6 +315,7 @@ describe("CORS Headers", () => {
     expect(headers.get("Access-Control-Allow-Origin")).toBe("https://example.com");
     expect(headers.get("Access-Control-Allow-Methods")).toContain("POST");
     expect(headers.get("Access-Control-Allow-Headers")).toContain("mcp-session-id");
+    expect(headers.get("Access-Control-Allow-Headers")).toContain(CLIENT_AUTH_HEADER);
     expect(headers.get("Access-Control-Expose-Headers")).toContain("mcp-session-id");
     expect(headers.get("Access-Control-Allow-Credentials")).toBe("true");
   });
@@ -374,37 +359,33 @@ describe("Session ID Handling", () => {
 });
 
 describe("Security Headers", () => {
-  it("should include X-Content-Type-Options header", () => {
+  // These assert the Worker's real setSecurityHeaders, not a copy of it, so a
+  // header dropped from production actually fails the suite.
+  function applied(): Headers {
     const headers = new Headers();
-    headers.set("X-Content-Type-Options", "nosniff");
+    setSecurityHeaders(headers);
+    return headers;
+  }
 
-    expect(headers.get("X-Content-Type-Options")).toBe("nosniff");
+  it("should include X-Content-Type-Options header", () => {
+    expect(applied().get("X-Content-Type-Options")).toBe("nosniff");
   });
 
   it("should include X-Frame-Options header", () => {
-    const headers = new Headers();
-    headers.set("X-Frame-Options", "DENY");
-
-    expect(headers.get("X-Frame-Options")).toBe("DENY");
+    expect(applied().get("X-Frame-Options")).toBe("DENY");
   });
 
   it("should include X-XSS-Protection header", () => {
-    const headers = new Headers();
-    headers.set("X-XSS-Protection", "1; mode=block");
-
-    expect(headers.get("X-XSS-Protection")).toBe("1; mode=block");
+    expect(applied().get("X-XSS-Protection")).toBe("1; mode=block");
   });
 
   it("should include Referrer-Policy header", () => {
-    const headers = new Headers();
-    headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-
-    expect(headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
+    expect(applied().get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
   });
 
   it("should include Access-Control-Max-Age header", () => {
     const headers = new Headers();
-    headers.set("Access-Control-Max-Age", "86400");
+    setCorsHeaders(headers, "*");
 
     expect(headers.get("Access-Control-Max-Age")).toBe("86400");
   });
@@ -444,30 +425,29 @@ describe("Environment Validation", () => {
 describe("CORS Enhancements", () => {
   it("should include Access-Control-Max-Age for preflight caching", () => {
     const headers = new Headers();
-    headers.set("Access-Control-Allow-Origin", "*");
-    headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id");
-    headers.set("Access-Control-Expose-Headers", "mcp-session-id");
-    headers.set("Access-Control-Max-Age", "86400");
+    setCorsHeaders(headers, "*");
 
     expect(headers.get("Access-Control-Max-Age")).toBe("86400");
   });
 
   it("should set credentials flag for non-wildcard origins", () => {
     const headers = new Headers();
-    const corsOrigin = "https://cursor.sh";
-
-    headers.set("Access-Control-Allow-Origin", corsOrigin);
-    headers.set("Access-Control-Allow-Credentials", "true");
+    setCorsHeaders(headers, "https://cursor.sh");
 
     expect(headers.get("Access-Control-Allow-Credentials")).toBe("true");
   });
 
   it("should not set credentials flag for wildcard origin", () => {
     const headers = new Headers();
-    headers.set("Access-Control-Allow-Origin", "*");
+    setCorsHeaders(headers, "*");
 
     expect(headers.get("Access-Control-Allow-Credentials")).toBeNull();
   });
-});
 
+  it("should advertise the client-auth header so browsers do not strip it", () => {
+    const headers = new Headers();
+    setCorsHeaders(headers, "https://cursor.sh");
+
+    expect(headers.get("Access-Control-Allow-Headers")).toContain(CLIENT_AUTH_HEADER);
+  });
+});

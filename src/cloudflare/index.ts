@@ -7,7 +7,7 @@
  * - HTTP Streamable transport (/mcp endpoint)
  * - Health checks (/health endpoint)
  * - CORS preflight requests
- * - Security validation (Origin)
+ * - Security validation (Origin, optional client auth via X-MCP-Auth-Token)
  * - Multi-user authentication via Authorization header
  * - Session routing via Durable Objects
  * - Rate limiting (optional, via RATE_LIMITER binding)
@@ -19,6 +19,12 @@
  * - Token is sent via Authorization: Bearer <fizzy-token> header
  * - The server does NOT store any Fizzy tokens
  * - Each request is authenticated against the Fizzy API using the client's token
+ *
+ * Client Authentication (optional, MCP_AUTH_TOKEN):
+ * - A server-level shared secret gating which clients may connect at all
+ * - Sent bare on X-MCP-Auth-Token, deliberately NOT on Authorization, which is
+ *   already the per-user Fizzy token — see utils/client-auth.ts
+ * - Enforced in validateSecurity(); /health and OPTIONS stay exempt below
  * 
  * @see https://developers.cloudflare.com/workers/
  * @see https://modelcontextprotocol.io/
@@ -29,6 +35,7 @@ import { SERVER_VERSION } from "./types.js";
 import { RateLimiter, createLogger, createAnalytics, type LogLevel } from "./utils/index.js";
 import { buildWorkerErrorEnvelope } from "./utils/worker-errors.js";
 import { validateSecurity } from "./security.js";
+import { setCorsHeaders, setSecurityHeaders } from "./headers.js";
 
 // Re-export Durable Object classes for Wrangler
 export { McpSessionDO } from "./mcp-session.js";
@@ -46,40 +53,6 @@ function extractFizzyToken(request: Request): string | null {
   }
   
   return null;
-}
-
-/**
- * Set CORS headers on response
- *
- * @see https://developers.cloudflare.com/workers/examples/cors-header-proxy/
- */
-function setCorsHeaders(headers: Headers, corsOrigin: string): void {
-  headers.set("Access-Control-Allow-Origin", corsOrigin);
-  headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-  headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id");
-  headers.set("Access-Control-Expose-Headers", "mcp-session-id");
-  headers.set("Access-Control-Max-Age", "86400"); // 24 hours - reduces preflight requests
-
-  if (corsOrigin !== "*") {
-    headers.set("Access-Control-Allow-Credentials", "true");
-  }
-}
-
-/**
- * Set security headers on response
- *
- * @see https://developers.cloudflare.com/workers/examples/security-headers/
- */
-function setSecurityHeaders(headers: Headers): void {
-  // Prevent MIME type sniffing
-  headers.set("X-Content-Type-Options", "nosniff");
-
-  // Prevent clickjacking by disallowing embedding in iframes
-  headers.set("X-Frame-Options", "DENY");
-
-  // Additional security headers for best practices
-  headers.set("X-XSS-Protection", "1; mode=block");
-  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
 }
 
 /**
@@ -258,6 +231,11 @@ export default {
       }
 
       // Handle health check (skip security for monitoring)
+      //
+      // `allowed` is deliberately ignored: validateSecurity is called only for
+      // the CORS origin it computes. /health must answer uptime monitors that
+      // hold no client token, which is also what the Node transports do by
+      // default (`skipHealthCheck: true` in utils/security.ts).
       if (path === "/health" && request.method === "GET") {
         const security = validateSecurity(request, env);
         return handleHealth(security.corsOrigin || "*", env);
@@ -267,6 +245,12 @@ export default {
       const security = validateSecurity(request, env);
 
       // Handle CORS preflight
+      //
+      // This returns *before* the `security.allowed` check below, and must keep
+      // doing so. Browsers send no custom headers on a preflight, so a request
+      // that would be perfectly authenticated arrives here with no
+      // X-MCP-Auth-Token; failing it would break every browser client before it
+      // ever got to send the real request.
       if (request.method === "OPTIONS") {
         return handleOptions(security.corsOrigin || "*");
       }

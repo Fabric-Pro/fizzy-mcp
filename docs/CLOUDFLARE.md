@@ -450,11 +450,50 @@ Authorization: Bearer <fizzy-personal-access-token>
    - Authenticates requests to Fizzy API
    - Provides complete session isolation between users
 
-2. **Client Authentication** (`MCP_AUTH_TOKEN`):
+2. **Client Authentication** (`MCP_AUTH_TOKEN`, via the `X-MCP-Auth-Token` header):
    - **Optional** but recommended for public deployments
-   - Requires MCP clients (like IDE extensions) to provide a server-level bearer token
+   - Requires MCP clients (like IDE extensions) to present a server-level shared token
    - Prevents unauthorized MCP clients from connecting to your server
-   - Independent of user authentication
+   - Independent of user authentication — the two layers use different headers,
+     which is what makes them usable at the same time
+   - Sent as the **bare token**, with no `Bearer ` prefix:
+
+     ```
+     X-MCP-Auth-Token: <mcp-auth-token>
+     ```
+
+   - The Worker accepts this header only. Putting the client token on
+     `Authorization` would collide with the per-user Fizzy token above and be
+     rejected as a missing client token.
+
+Both headers together, in a client config:
+
+```json
+{
+  "mcpServers": {
+    "fizzy": {
+      "url": "https://fizzy-mcp.your-subdomain.workers.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN",
+        "X-MCP-Auth-Token": "YOUR_MCP_AUTH_TOKEN"
+      }
+    }
+  }
+}
+```
+
+Set the token as a secret, never as a plaintext `vars` entry — `wrangler.jsonc`
+is committed:
+
+```bash
+wrangler secret put MCP_AUTH_TOKEN
+```
+
+> **Node HTTP/SSE deployments** accept the same `X-MCP-Auth-Token` header, and
+> that is the recommended way to configure them. They also still accept
+> `Authorization: Bearer <MCP_AUTH_TOKEN>` for backwards compatibility, but that
+> mode consumes the header the per-user Fizzy token needs, so do not use it for
+> new deployments.
 
 ### CORS Configuration
 
@@ -479,7 +518,7 @@ The deployment automatically includes security headers on all responses:
 
 ### Best Practices
 
-1. **Always set `MCP_AUTH_TOKEN`** for public deployments
+1. **Always set `MCP_AUTH_TOKEN`** for public deployments — via `wrangler secret put MCP_AUTH_TOKEN`, and have clients send it on `X-MCP-Auth-Token`
 2. **Restrict `MCP_ALLOWED_ORIGINS`** to known clients
 3. **Use read-only Fizzy tokens** if write access isn't needed
 4. **Monitor access logs** via Cloudflare Dashboard
@@ -593,9 +632,32 @@ Get your token from [app.fizzy.do](https://app.fizzy.do) → Profile → API →
 
 ### "Client authentication required"
 
-**Cause**: Server has `MCP_AUTH_TOKEN` configured but client didn't provide it.
+**Cause**: Server has `MCP_AUTH_TOKEN` configured but the client sent no
+`X-MCP-Auth-Token` header. Sending the client token on `Authorization` instead
+produces this same error — that header is read as your per-user Fizzy token, so
+the Worker sees no client token at all.
 
-**Solution**: This is different from user authentication. If the server requires client authentication, contact the server administrator for the MCP auth token.
+**Solution**: This is different from user authentication. Send the client token
+in its own header, alongside your Fizzy token:
+
+```json
+{
+  "headers": {
+    "Authorization": "Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN",
+    "X-MCP-Auth-Token": "YOUR_MCP_AUTH_TOKEN"
+  }
+}
+```
+
+If you don't have the MCP auth token, contact the server administrator.
+
+### "Invalid client authentication token"
+
+**Cause**: The `X-MCP-Auth-Token` header was sent but doesn't match the server's
+`MCP_AUTH_TOKEN`.
+
+**Solution**: Check the value with the server administrator. Note that it is the
+bare token — no `Bearer ` prefix, unlike the `Authorization` header.
 
 ### "Origin not allowed"
 

@@ -352,7 +352,7 @@ describe("HTTP Transport - Edge Cases", () => {
       expect(res._statusCode).toBe(204);
       expect(res.setHeader).toHaveBeenCalledWith(
         "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, mcp-session-id"
+        "Content-Type, Authorization, mcp-session-id, X-MCP-Auth-Token"
       );
     });
 

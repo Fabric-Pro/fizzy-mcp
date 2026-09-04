@@ -41,6 +41,7 @@ import {
   type McpToolDefinition,
 } from "../tools/json-schema.js";
 import { executeToolHandler } from "../tools/handlers.js";
+import { CLIENT_AUTH_HEADER } from "../utils/client-auth.js";
 
 /**
  * Session timeout in milliseconds (30 minutes)
@@ -425,7 +426,7 @@ export class McpSessionDO extends DurableObject<Env> {
       headers: {
         "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, mcp-session-id",
+        "Access-Control-Allow-Headers": `Content-Type, Authorization, mcp-session-id, ${CLIENT_AUTH_HEADER}`,
         "Access-Control-Max-Age": "86400",
       },
     });
