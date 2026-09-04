@@ -85,7 +85,7 @@ npm run start:http    # Streamable HTTP transport (port 3000)
 - `FIZZY_BASE_URL` — API base URL (default: `https://app.fizzy.do`)
 - `MCP_TRANSPORT` — default transport (default: `stdio`)
 - `MCP_ALLOWED_ORIGINS` — CORS origins (default: `*`); matched exactly, except that a portless loopback entry matches any port on the same scheme and hostname (`utils/origin.ts`)
-- `MCP_AUTH_TOKEN` — optional client bearer token
+- `MCP_AUTH_TOKEN` — optional server-level client-auth token; clients send it bare in the `X-MCP-Auth-Token` header (`utils/client-auth.ts`), kept off `Authorization` because that carries the per-user Fizzy token. Node transports also still accept `Authorization: Bearer <token>` as a fallback; the Worker does not
 - `LOG_LEVEL` — `debug`/`info`/`warn`/`error` (default: `info`)
 
 ## Code Conventions

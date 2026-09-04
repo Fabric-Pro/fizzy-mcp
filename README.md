@@ -95,7 +95,7 @@ Supports HTTP transport only:
 - Multiple users can connect simultaneously
 - Each session is isolated with its own FizzyClient instance
 - Sessions timeout after 30 minutes of inactivity
-- Optional server-level authentication via `MCP_AUTH_TOKEN` environment variable
+- Optional server-level authentication via `MCP_AUTH_TOKEN` environment variable (clients send it in the `X-MCP-Auth-Token` header)
 
 ## Prerequisites
 
@@ -460,7 +460,7 @@ When using HTTP or SSE transports, additional security options are available:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `MCP_ALLOWED_ORIGINS` | No | `*` | Allowed CORS origins (comma-separated or `*` for all) |
-| `MCP_AUTH_TOKEN` | No | — | Optional bearer token for Client Authentication (authenticates MCP clients connecting to this server) |
+| `MCP_AUTH_TOKEN` | No | — | Optional shared token for Client Authentication (authenticates MCP clients connecting to this server). Clients send it bare in the `X-MCP-Auth-Token` header; `Authorization: Bearer <token>` is still accepted for compatibility but collides with the per-user Fizzy token |
 | `MCP_BIND_ALL_INTERFACES` | No | `false` | Set to `true` to bind to 0.0.0.0 instead of localhost |
 
 Origins are matched exactly. The one convenience is loopback: an entry written
@@ -491,7 +491,8 @@ npx fizzy-mcp --transport http --port 3000
 MCP_ALLOWED_ORIGINS="http://localhost:3000,https://myapp.com" \
 npx fizzy-mcp --transport http --port 3000
 
-# Enable Client Authentication (require MCP clients to provide a bearer token)
+# Enable Client Authentication (require MCP clients to present a shared token)
+# Clients then send it as: X-MCP-Auth-Token: my-secret-token
 MCP_AUTH_TOKEN="my-secret-token" \
 npx fizzy-mcp --transport http --port 3000
 
@@ -503,8 +504,19 @@ npx fizzy-mcp --transport http --port 3000
 ```
 
 > ⚠️ **Authentication Types:**
-> - **User Authentication** (via `Authorization` header): Required for SSE/HTTP transports. Each user provides their own Fizzy Personal Access Token.
-> - **Client Authentication** (`MCP_AUTH_TOKEN`): Optional. Authenticates MCP clients (like IDE extensions) connecting to this server.
+> - **User Authentication** (via `Authorization` header): Required for SSE/HTTP transports. Each user provides their own Fizzy Personal Access Token. On the Cloudflare Worker, `Authorization` is *only* ever read as this token; the Node transports also read it as the client token in the compatibility mode described below, which is why that mode should not be used for new deployments.
+> - **Client Authentication** (`MCP_AUTH_TOKEN`, via the `X-MCP-Auth-Token` header): Optional. Authenticates MCP clients (like IDE extensions) connecting to this server. Sent as the bare token, with no `Bearer ` prefix, so it never competes with the Fizzy token above:
+>
+>   ```json
+>   {
+>     "headers": {
+>       "Authorization": "Bearer YOUR_FIZZY_PERSONAL_ACCESS_TOKEN",
+>       "X-MCP-Auth-Token": "YOUR_MCP_AUTH_TOKEN"
+>     }
+>   }
+>   ```
+>
+>   For compatibility, the Node HTTP/SSE transports also still accept the client token as `Authorization: Bearer <MCP_AUTH_TOKEN>` when no `X-MCP-Auth-Token` header is present. That mode consumes the header the per-user Fizzy token needs, so don't use it for new deployments. The Cloudflare Worker accepts `X-MCP-Auth-Token` only.
 >
 > **Note:** For stdio transport, use `FIZZY_ACCESS_TOKEN` environment variable (single-user mode for CLI/IDE integrations).
 

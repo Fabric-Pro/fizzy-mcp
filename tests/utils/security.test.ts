@@ -8,6 +8,7 @@ import {
   getBindAddress,
   SecurityOptions,
 } from "../../src/utils/security.js";
+import { CLIENT_AUTH_HEADER_LOWER } from "../../src/utils/client-auth.js";
 
 // Helper to create mock request
 function createMockRequest(
@@ -203,6 +204,123 @@ describe("Security Utilities", () => {
         
         expect(result.allowed).toBe(true);
       });
+
+      // The dedicated header. Everything above is the legacy Authorization
+      // fallback and must keep passing unchanged — that is the compatibility
+      // proof for existing deployments.
+      it("should allow requests with the correct X-MCP-Auth-Token header", async () => {
+        const req = createMockRequest("GET", {
+          origin: "http://localhost:3000",
+          [CLIENT_AUTH_HEADER_LOWER]: "secret-token",
+        });
+        const options: SecurityOptions = { authToken: "secret-token" };
+        const result = await validateRequestSecurity(req, options, 3000);
+
+        expect(result.allowed).toBe(true);
+      });
+
+      it("should reject a wrong token on the X-MCP-Auth-Token header", async () => {
+        const req = createMockRequest("GET", {
+          origin: "http://localhost:3000",
+          [CLIENT_AUTH_HEADER_LOWER]: "wrong-token",
+        });
+        const options: SecurityOptions = { authToken: "secret-token" };
+        const result = await validateRequestSecurity(req, options, 3000);
+
+        expect(result.allowed).toBe(false);
+        expect(result.statusCode).toBe(401);
+        expect(result.error).toBe("Invalid client authentication token");
+      });
+
+      // The point of the dedicated header: client auth and the per-user Fizzy
+      // token can now both be present without fighting over Authorization.
+      it("should allow the client token alongside a different Fizzy token on Authorization", async () => {
+        const req = createMockRequest("GET", {
+          origin: "http://localhost:3000",
+          [CLIENT_AUTH_HEADER_LOWER]: "secret-token",
+          authorization: "Bearer user-fizzy-pat",
+        });
+        const options: SecurityOptions = { authToken: "secret-token" };
+        const result = await validateRequestSecurity(req, options, 3000);
+
+        expect(result.allowed).toBe(true);
+      });
+
+      it("should reject a wrong X-MCP-Auth-Token even when Authorization carries the token", async () => {
+        const req = createMockRequest("GET", {
+          origin: "http://localhost:3000",
+          [CLIENT_AUTH_HEADER_LOWER]: "wrong-token",
+          authorization: "Bearer secret-token",
+        });
+        const options: SecurityOptions = { authToken: "secret-token" };
+        const result = await validateRequestSecurity(req, options, 3000);
+
+        expect(result.allowed).toBe(false);
+        expect(result.statusCode).toBe(401);
+        expect(result.error).toBe("Invalid client authentication token");
+      });
+
+      // An empty header is not a presented token; it falls through to the
+      // Authorization path, which here has nothing either.
+      it("should fall back to Authorization when X-MCP-Auth-Token is empty", async () => {
+        const req = createMockRequest("GET", {
+          origin: "http://localhost:3000",
+          [CLIENT_AUTH_HEADER_LOWER]: "",
+          authorization: "Bearer secret-token",
+        });
+        const options: SecurityOptions = { authToken: "secret-token" };
+        const result = await validateRequestSecurity(req, options, 3000);
+
+        expect(result.allowed).toBe(true);
+      });
+
+      // A duplicated header arrives as an array; that is ambiguous, so it must
+      // never be read as a pass.
+      it("should not accept a duplicated X-MCP-Auth-Token header as a pass", async () => {
+        const req = createMockRequest("GET", { origin: "http://localhost:3000" });
+        (req.headers as Record<string, unknown>)[CLIENT_AUTH_HEADER_LOWER] = [
+          "secret-token",
+          "secret-token",
+        ];
+        const options: SecurityOptions = { authToken: "secret-token" };
+        const result = await validateRequestSecurity(req, options, 3000);
+
+        expect(result.allowed).toBe(false);
+        expect(result.statusCode).toBe(401);
+        expect(result.error).toBe("Client authentication required");
+      });
+
+      // A browser sends no custom headers and no Authorization on a preflight,
+      // so requiring the token here would fail every browser client before it
+      // could send the real, authenticated request.
+      it("should exempt OPTIONS preflight from client authentication", async () => {
+        const req = createMockRequest("OPTIONS", { origin: "http://localhost:3000" });
+        const options: SecurityOptions = { authToken: "secret-token" };
+        const result = await validateRequestSecurity(req, options, 3000);
+
+        expect(result.allowed).toBe(true);
+      });
+
+      it("should still reject a disallowed origin on an OPTIONS preflight", async () => {
+        const req = createMockRequest("OPTIONS", { origin: "https://evil.com" });
+        const options: SecurityOptions = {
+          authToken: "secret-token",
+          allowedOrigins: ["http://localhost:3000"],
+        };
+        const result = await validateRequestSecurity(req, options, 3000);
+
+        expect(result.allowed).toBe(false);
+        expect(result.statusCode).toBe(403);
+      });
+
+      it("should still require the token on the real request after a preflight", async () => {
+        const req = createMockRequest("POST", { origin: "http://localhost:3000" });
+        const options: SecurityOptions = { authToken: "secret-token" };
+        const result = await validateRequestSecurity(req, options, 3000);
+
+        expect(result.allowed).toBe(false);
+        expect(result.statusCode).toBe(401);
+      });
     });
 
     describe("Custom Authorization", () => {
@@ -273,7 +391,7 @@ describe("Security Utilities", () => {
       
       expect(res.setHeader).toHaveBeenCalledWith("Access-Control-Allow-Origin", "https://myapp.com");
       expect(res.setHeader).toHaveBeenCalledWith("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-      expect(res.setHeader).toHaveBeenCalledWith("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id");
+      expect(res.setHeader).toHaveBeenCalledWith("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id, X-MCP-Auth-Token");
       expect(res.setHeader).toHaveBeenCalledWith("Access-Control-Expose-Headers", "mcp-session-id");
       expect(res.setHeader).toHaveBeenCalledWith("Access-Control-Allow-Credentials", "true");
     });

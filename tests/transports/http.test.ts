@@ -156,7 +156,7 @@ describe("HTTP Transport", () => {
       );
       expect(res.setHeader).toHaveBeenCalledWith(
         "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, mcp-session-id"
+        "Content-Type, Authorization, mcp-session-id, X-MCP-Auth-Token"
       );
       expect(res.setHeader).toHaveBeenCalledWith(
         "Access-Control-Expose-Headers",

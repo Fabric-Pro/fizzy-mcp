@@ -26,6 +26,7 @@
     "src/utils/logger.ts",
     "src/utils/attachments.ts",
     "src/utils/base64.ts",
+    "src/utils/client-auth.ts",
     "src/utils/file-source.ts",
     "src/utils/md5.ts",
     "src/utils/origin.ts",

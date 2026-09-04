@@ -10,16 +10,26 @@
  *
  * Note: Client Authentication (MCP_AUTH_TOKEN) is separate from User Authentication.
  * User Authentication uses per-user Fizzy tokens sent via Authorization header.
+ * Client Authentication belongs on its own header, X-MCP-Auth-Token, so the two
+ * layers do not fight over Authorization; see utils/client-auth.ts.
  *
  * Environment Variables:
  * - MCP_ALLOWED_ORIGINS: Comma-separated list of allowed origins (or "*" for all)
- * - MCP_AUTH_TOKEN: Bearer token for MCP client authentication
+ * - MCP_AUTH_TOKEN: Token for MCP client authentication, sent on X-MCP-Auth-Token
  * - MCP_BIND_ALL_INTERFACES: Set to "true" to bind to 0.0.0.0
  */
 
 import { IncomingMessage, ServerResponse } from "node:http";
 import { logger } from "./logger.js";
 import { isOriginAllowed } from "./origin.js";
+import {
+  CLIENT_AUTH_FORMAT_ERROR,
+  CLIENT_AUTH_HEADER,
+  CLIENT_AUTH_HEADER_LOWER,
+  CLIENT_AUTH_INVALID_ERROR,
+  CLIENT_AUTH_REQUIRED_ERROR,
+  timingSafeEqualString,
+} from "./client-auth.js";
 
 const log = logger.child("security");
 
@@ -36,8 +46,12 @@ export interface SecurityOptions {
   allowedOrigins?: string[];
   
   /**
-   * Bearer token for Client Authentication
-   * If set, MCP clients must include Authorization: Bearer <token> header
+   * Shared token for Client Authentication
+   * If set, MCP clients must send it in the X-MCP-Auth-Token header (bare
+   * value, no "Bearer " prefix). Authorization: Bearer <token> is still
+   * accepted as a fallback for existing deployments, but it collides with the
+   * per-user Fizzy token on that same header, so new deployments should use
+   * X-MCP-Auth-Token.
    * This is separate from User Authentication (FIZZY_ACCESS_TOKEN) which
    * authenticates the user with the Fizzy API
    * Can also be configured via MCP_AUTH_TOKEN environment variable
@@ -152,38 +166,72 @@ export async function validateRequestSecurity(
     log.debug("Request without Origin header (likely non-browser client)");
   }
   
-  // 2. Validate Client Authentication (Bearer token)
+  // 2. Validate Client Authentication (MCP_AUTH_TOKEN)
   // This authenticates the MCP client connecting to this server
   // (separate from User Authentication via FIZZY_ACCESS_TOKEN for the Fizzy API)
-  if (resolved.authToken) {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader) {
-      log.warn("Missing Authorization header for client authentication");
-      return {
-        allowed: false,
-        statusCode: 401,
-        error: "Client authentication required",
-      };
-    }
-    
-    if (!authHeader.startsWith("Bearer ")) {
-      log.warn("Invalid Authorization header format for client authentication");
-      return {
-        allowed: false,
-        statusCode: 401,
-        error: "Invalid client authentication format. Expected: Bearer <token>",
-      };
-    }
-    
-    const token = authHeader.slice(7); // Remove "Bearer "
-    if (token !== resolved.authToken) {
-      log.warn("Invalid client authentication token");
-      return {
-        allowed: false,
-        statusCode: 401,
-        error: "Invalid client authentication token",
-      };
+  //
+  // Preferred: the dedicated `X-MCP-Auth-Token` header, carrying the bare token.
+  // It is what the Cloudflare Worker accepts, and it is the only way the two
+  // layers are genuinely independent — `Authorization` is also read as the
+  // caller's per-user Fizzy token by `extractFizzyToken` below, so a deployment
+  // that spends it on the client token cannot also do per-user auth.
+  //
+  // Fallback: `Authorization: Bearer <token>`, unchanged, because existing
+  // deployments send it that way. New deployments should not adopt it.
+  //
+  // Preflight is exempt. A browser sends no custom headers and no Authorization
+  // on an OPTIONS preflight, so an otherwise perfectly authenticated client
+  // arrives here carrying nothing; rejecting it would fail the request before
+  // the browser ever got to send the real one, making client authentication
+  // unusable from a browser entirely. Answering the preflight discloses only
+  // which headers are permitted, and the request it clears is still fully
+  // authenticated when it arrives. The Worker is exempt for the same reason
+  // (see the OPTIONS branch in cloudflare/index.ts). Origin validation above
+  // still applies to preflights.
+  if (resolved.authToken && req.method !== "OPTIONS") {
+    const headerToken = req.headers[CLIENT_AUTH_HEADER_LOWER];
+
+    // A duplicated header arrives as an array. That is ambiguous, so it falls
+    // through to the Authorization path rather than being read as a pass.
+    if (typeof headerToken === "string" && headerToken !== "") {
+      if (!timingSafeEqualString(headerToken, resolved.authToken)) {
+        log.warn(`Invalid client authentication token on ${CLIENT_AUTH_HEADER}`);
+        return {
+          allowed: false,
+          statusCode: 401,
+          error: CLIENT_AUTH_INVALID_ERROR,
+        };
+      }
+    } else {
+      const authHeader = req.headers.authorization;
+
+      if (!authHeader) {
+        log.warn("Missing Authorization header for client authentication");
+        return {
+          allowed: false,
+          statusCode: 401,
+          error: CLIENT_AUTH_REQUIRED_ERROR,
+        };
+      }
+
+      if (!authHeader.startsWith("Bearer ")) {
+        log.warn("Invalid Authorization header format for client authentication");
+        return {
+          allowed: false,
+          statusCode: 401,
+          error: CLIENT_AUTH_FORMAT_ERROR,
+        };
+      }
+
+      const token = authHeader.slice(7); // Remove "Bearer "
+      if (!timingSafeEqualString(token, resolved.authToken)) {
+        log.warn("Invalid client authentication token");
+        return {
+          allowed: false,
+          statusCode: 401,
+          error: CLIENT_AUTH_INVALID_ERROR,
+        };
+      }
     }
   }
   
@@ -244,7 +292,10 @@ export function setSecureCorsHeaders(
 ): void {
   res.setHeader("Access-Control-Allow-Origin", corsOrigin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, mcp-session-id");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    `Content-Type, Authorization, mcp-session-id, ${CLIENT_AUTH_HEADER}`
+  );
   
   if (exposedHeaders.length > 0) {
     res.setHeader("Access-Control-Expose-Headers", exposedHeaders.join(", "));

@@ -43,6 +43,24 @@ export interface Env {
   MCP_ALLOWED_ORIGINS?: string;
 
   /**
+   * Client authentication token — a server-level shared secret gating which
+   * clients may connect at all. Clients present it in the `X-MCP-Auth-Token`
+   * header, as the bare value with no `Bearer ` prefix.
+   *
+   * This is NOT the per-user Fizzy Personal Access Token: that stays on
+   * `Authorization: Bearer <fizzy-pat>` and authenticates the caller against
+   * the Fizzy API. The two layers are independent precisely because they use
+   * different headers.
+   *
+   * Set it with `wrangler secret put MCP_AUTH_TOKEN`, never as a plaintext
+   * `vars` entry — `wrangler.jsonc` is committed, and a secret in it is a
+   * secret in the repository.
+   *
+   * Default: unset (no client authentication)
+   */
+  MCP_AUTH_TOKEN?: string;
+
+  /**
    * Rate limit: requests per minute per user
    * Default: 100
    */

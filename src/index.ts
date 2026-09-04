@@ -64,7 +64,10 @@ Environment Variables:
 
 Security (HTTP/SSE transports):
   MCP_ALLOWED_ORIGINS     Allowed CORS origins (comma-separated, or "*" for all)
-  MCP_AUTH_TOKEN          Bearer token for client authentication (optional)
+  MCP_AUTH_TOKEN          Shared token for client authentication (optional).
+                          Clients send it bare in the X-MCP-Auth-Token header;
+                          Authorization: Bearer <token> still works but collides
+                          with the per-user Fizzy token on that same header.
   MCP_BIND_ALL_INTERFACES Set to "true" to bind to 0.0.0.0 (not recommended)
 
 Multi-User Support (HTTP/SSE):
