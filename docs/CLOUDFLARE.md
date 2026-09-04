@@ -76,7 +76,7 @@ Unlike the Node.js stdio transport which uses a single `FIZZY_ACCESS_TOKEN` envi
 
 1. **Cloudflare Account**: Sign up at [cloudflare.com](https://cloudflare.com)
 2. **Wrangler CLI**: Installed via npm (included in dev dependencies)
-3. **Node.js 18+**: For development and deployment
+3. **Node.js 22+**: For development and deployment
 
 **Note**: Unlike Node.js stdio deployment, you do **not** need to configure a `FIZZY_ACCESS_TOKEN` environment variable. Each user will provide their own Fizzy Personal Access Token when connecting to the deployed Worker.
 

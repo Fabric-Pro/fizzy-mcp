@@ -8,7 +8,7 @@ fizzy-mcp is an MCP (Model Context Protocol) server for the Fizzy project manage
 ## Tech Stack
 
 - **Language:** TypeScript 5.7 (ES2022, ESM modules)
-- **Runtime:** Node.js 18+ (standard), Cloudflare Workers (production)
+- **Runtime:** Node.js 22+ (standard), Cloudflare Workers (production)
 - **MCP SDK:** @modelcontextprotocol/sdk
 - **Validation:** Zod
 - **Testing:** Vitest
