@@ -18,7 +18,6 @@ import { DurableObject } from "cloudflare:workers";
 import { FizzyClient } from "../client/fizzy-client.js";
 import type {
   Env,
-  DurableObjectState,
   JsonRpcRequest,
   JsonRpcResponse,
   JsonRpcMessage,
@@ -54,6 +53,19 @@ const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 const ALARM_INTERVAL_MS = 15 * 60 * 1000;
 
 /**
+ * The `ctx` type the `DurableObject` base class actually declares, derived from the base
+ * class rather than imported separately from `@cloudflare/workers-types`.
+ *
+ * Annotating with the separately-imported `DurableObjectState` compiles and describes the
+ * same runtime value, but under @cloudflare/workers-types v5 it sends the checker into a
+ * combinatorial structural comparison at the `super(ctx, env)` call: `npm run typecheck:cf`
+ * goes from ~1.7s to over twelve minutes without terminating. Deriving the type from the
+ * base class gives the checker an identity match instead of a structural one, which
+ * resolves immediately.
+ */
+type DurableObjectCtx<E> = ConstructorParameters<typeof DurableObject<E>>[0];
+
+/**
  * MCP Session Durable Object
  *
  * Handles Streamable HTTP transport for MCP protocol.
@@ -66,7 +78,7 @@ export class McpSessionDO extends DurableObject<Env> {
   private logger: CloudflareLogger;
   private analytics: CloudflareAnalytics;
 
-  constructor(ctx: DurableObjectState, env: Env) {
+  constructor(ctx: DurableObjectCtx<Env>, env: Env) {
     super(ctx, env);
     
     // Initialize logger with session ID
