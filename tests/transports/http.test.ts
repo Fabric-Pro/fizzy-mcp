@@ -8,13 +8,13 @@ import { SessionManager } from "../../src/utils/session-manager.js";
 
 // Mock the SDK transports
 vi.mock("@modelcontextprotocol/sdk/server/streamableHttp.js", () => ({
-  StreamableHTTPServerTransport: vi.fn().mockImplementation((options) => {
+  StreamableHTTPServerTransport: vi.fn().mockImplementation(function (options) {
     const sessionId = crypto.randomUUID();
     // Simulate session initialization callback
     setTimeout(() => {
       options.onsessioninitialized?.(sessionId);
     }, 0);
-    
+
     return {
       sessionId,
       handleRequest: vi.fn().mockImplementation((req, res) => {

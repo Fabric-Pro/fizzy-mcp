@@ -13,7 +13,7 @@ let sessionCloseCallbacks: Array<(sessionId: string) => void> = [];
 
 // Mock the SDK transports
 vi.mock("@modelcontextprotocol/sdk/server/streamableHttp.js", () => ({
-  StreamableHTTPServerTransport: vi.fn().mockImplementation((options) => {
+  StreamableHTTPServerTransport: vi.fn().mockImplementation(function (options) {
     const sessionId = crypto.randomUUID();
     createdSessionIds.push(sessionId);
     

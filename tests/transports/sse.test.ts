@@ -7,7 +7,7 @@ import { SessionManager } from "../../src/utils/session-manager.js";
 
 // Mock the SDK transports
 vi.mock("@modelcontextprotocol/sdk/server/sse.js", () => ({
-  SSEServerTransport: vi.fn().mockImplementation((endpoint, res) => {
+  SSEServerTransport: vi.fn().mockImplementation(function (endpoint, res) {
     const sessionId = `test-session-${Date.now()}`;
     return {
       sessionId,

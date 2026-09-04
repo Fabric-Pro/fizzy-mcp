@@ -14,7 +14,7 @@ let mockTransportInstances: Array<{
 
 // Mock the SDK transports
 vi.mock("@modelcontextprotocol/sdk/server/sse.js", () => ({
-  SSEServerTransport: vi.fn().mockImplementation((endpoint, res) => {
+  SSEServerTransport: vi.fn().mockImplementation(function (endpoint, res) {
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const instance = {
       sessionId,

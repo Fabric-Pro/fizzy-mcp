@@ -422,7 +422,7 @@ describe("SessionManager", () => {
   });
 
   describe("Concurrent Access Simulation", () => {
-    it("should handle rapid create/delete cycles", () => {
+    it("should handle rapid create/delete cycles", async () => {
       manager = new SessionManager({ cleanupInterval: 0 });
 
       const operations: Promise<void>[] = [];
@@ -438,7 +438,7 @@ describe("SessionManager", () => {
       }
 
       // All operations should complete without error
-      expect(Promise.all(operations)).resolves.not.toThrow();
+      await expect(Promise.all(operations)).resolves.not.toThrow();
     });
 
     it("should maintain consistency under simulated load", () => {
