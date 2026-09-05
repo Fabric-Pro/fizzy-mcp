@@ -161,23 +161,59 @@ function packageName(specifier: string): string {
   return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
 }
 
+/** The numeric escapes that can disguise a character of a package name. Sticky: matched at a known backslash, never searched for. */
+const NUMERIC_ESCAPE = /\\u\{([0-9a-fA-F]{1,6})\}|\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})/y;
+
 /**
  * Decode a specifier's escape sequences, so an escaped spelling is recognised
  * as the package it resolves to rather than reported as an undeclared package
  * named after the escape text.
  *
- * Only literals containing a backslash pay for this, and only the escapes JSON
- * shares with TypeScript are decoded — a name outside that set (`\x7a`,
- * `\u{7a}`) falls back to the raw text, which is the pre-existing behaviour
- * rather than a new failure. No specifier in `src/` is escaped at all.
+ * Decoding is done directly rather than by rebuilding a JSON string and parsing
+ * it. The earlier version did that — `JSON.parse('"' + raw.replace(/"/g, …) +
+ * '"')` — which escaped quotes but not backslashes, so the input could break out
+ * of the string being constructed. CodeQL flagged it as incomplete escaping and
+ * was right. Building a syntax and immediately parsing it is the mistake; only
+ * the numeric escapes are needed, and they can be substituted in place.
+ *
+ * Only the numeric forms are handled, because they are the only ones that can
+ * spell a package-name character as something else. A name containing a literal
+ * backslash or a `\n` is not a package name. No specifier in `src/` is escaped
+ * at all; this exists so that one would not be reported under its escape text.
  */
 function decodeSpecifier(raw: string): string {
   if (!raw.includes("\\")) return raw;
-  try {
-    return JSON.parse(`"${raw.replace(/"/g, '\\"')}"`) as string;
-  } catch {
-    return raw;
+
+  let out = "";
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i] !== "\\") {
+      out += raw[i++];
+      continue;
+    }
+
+    NUMERIC_ESCAPE.lastIndex = i;
+    const escape = NUMERIC_ESCAPE.exec(raw);
+    if (escape) {
+      const code = Number.parseInt(escape[1] ?? escape[2] ?? escape[3], 16);
+      // `\u{110000}` is a syntax error in real source; leave anything out of
+      // range as written rather than throwing from String.fromCodePoint.
+      if (code <= 0x10ffff) {
+        out += String.fromCodePoint(code);
+        i += escape[0].length;
+        continue;
+      }
+    }
+
+    // Any other escape yields the character after the backslash. This is why
+    // the scan runs left to right instead of replacing matches globally: in
+    // `a\\u0070` the first backslash escapes the second, so the `u0070` after it
+    // is ordinary text — a global replace would decode it anyway.
+    out += raw[i + 1] ?? "";
+    i += 2;
   }
+
+  return out;
 }
 
 /** Whitespace as the language defines it, not just the ASCII four. */
@@ -417,6 +453,8 @@ describe("scanner", () => {
     ["a line comment ended by U+2029", 'await import(// c\u2029"pkg");'],
     ["a template with no substitution as a specifier", "const v = await import(`pkg`);"],
     ["an escaped specifier", 'import z from "\\u0070kg";'],
+    ["a hex-escaped specifier", 'import z from "\\x70kg";'],
+    ["a braced-unicode-escaped specifier", 'import z from "\\u{70}kg";'],
   ])("detects %s", (_label, source) => {
     expect(runtimeImports(source)).toEqual(["pkg"]);
   });
@@ -492,6 +530,20 @@ describe("scanner", () => {
     expect(() => runtimeImports('import x from "pkg')).not.toThrow();
     expect(() => runtimeImports("const v = `${await import(")).not.toThrow();
   });
+  it("decodes specifier escapes without constructing a string to parse", () => {
+    // CodeQL flagged the previous decoder: it rebuilt a JSON string and
+    // parsed it, escaping quotes but not backslashes, so the input could
+    // break out of the string being built. Decoding in place removes the
+    // construct, so there is nothing to break out of.
+    expect(() => runtimeImports(String.raw`import x from "a\\\"b";`)).not.toThrow();
+
+    // An escaped backslash is a backslash: the `u0070` after it is text, not
+    // an escape, and must not be decoded as one.
+    expect(runtimeImports(String.raw`import x from "a\\u0070";`)).toEqual([
+      String.raw`a\u0070`,
+    ]);
+  });
+
 
   it("scans pathological input without backtracking", () => {
     // The regression this guards: an earlier version matched the gaps between
