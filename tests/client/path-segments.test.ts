@@ -102,9 +102,9 @@
  *    So this check does not try to re-derive path safety for a raw `fetch` at
  *    all — that would mean tracing an arbitrary URL expression back through
  *    whatever built it, exactly the general-purpose data-flow analysis this
- *    whole sweep avoids. Instead it enumerates every bare `fetch(` call in the
- *    file, resolves its enclosing method and the exact source text of its URL
- *    argument, and requires that pair to match one of the hardcoded
+ *    whole sweep avoids. Instead it enumerates every `fetch` in the file,
+ *    resolves each one's enclosing method and the exact source text of its
+ *    URL argument, and requires that pair to match one of the hardcoded
  *    `RAW_FETCH_ALLOWLIST` entries — each one a human judgment call, made
  *    once, with a comment saying why that specific call is safe. A call in an
  *    unlisted method, or one whose URL expression no longer matches what the
@@ -114,6 +114,22 @@
  *    the file fails the suite even if it happens to reuse an
  *    already-allowlisted method and expression, which the allowlist match
  *    alone would not catch.
+ *
+ *    **Every `fetch`, not every `fetch(`.** This check first looked only for
+ *    a bare `fetch(` call, which made "the spellings someone thought to write
+ *    a pattern for" the working definition of a network sink. It is not one:
+ *    `globalThis.fetch(...)` reaches the network identically, and so does a
+ *    `fetch` stored in a variable and called through that name later, where
+ *    no pattern keyed on the call site can see it at all. Either one could
+ *    have carried the concatenated path above past all three checks with the
+ *    pinned count still reading 3. So the rule is inverted: every textual
+ *    occurrence of the identifier `fetch` is found, and anything that is not
+ *    one of the three reviewed bare calls is a violation on sight. The
+ *    allowlist is an inventory of approved *occurrences*, not of syntax.
+ *    `fetchAttachment` and other longer identifiers are unaffected, since
+ *    `\bfetch\b` does not match inside a word; string and template *text* is
+ *    blanked first (`blankStringLiterals`), because this client mentions
+ *    "fetch" in four ordinary strings and none of them is a network call.
  *
  * **Design is default-deny, and picks a direction to be wrong in.** Borrowed
  * directly from declared-dependencies.test.ts: a guard that quietly misses a
@@ -271,6 +287,8 @@ interface FetchCallSite {
   line: number;
   method: MethodStart;
   urlArg: Span | undefined;
+  /** False for any `fetch` that is not a bare `fetch(` call — see findRawFetchCallSites. */
+  isBareCall: boolean;
 }
 
 interface Violation {
@@ -997,28 +1015,132 @@ function findCallViolations(source: string): Violation[] {
 // past both in silence.
 
 /**
- * Every bare `fetch(` call in `masked` — not `this.request*`, not
- * `something.fetch(` — with its first (URL) argument located. The negative
- * lookbehind excludes a method call on some other object ending in `fetch`
- * and a hypothetical `this.fetch(`, neither of which occurs in this file
- * today; a plain identifier call is the only shape actually present at the
- * three real sites.
+ * Blank the *text* of every string and template literal in `masked`, keeping
+ * the quotes, the length and the newlines, so an index into the result still
+ * lines up with the same character in the input.
+ *
+ * Only the raw-fetch check below wants this. The other two checks read what
+ * is inside a template literal — that text is the request path — so they run
+ * on the comment-masked source with strings intact. The fetch check wants the
+ * opposite: `fetch` appears four times in this client inside ordinary strings
+ * (`error.message.includes("fetch")` three times and one timeout message),
+ * and none of those is a network sink.
+ *
+ * A `${...}` interpolation is copied through rather than blanked: the literal
+ * text around an expression is prose, but the expression itself is code and a
+ * call hiding there must stay visible. A nested template inside such an
+ * expression keeps its text visible too, which over-reports rather than
+ * under-reports — the direction this file always errs in.
  */
-function findRawFetchCallSites(masked: string, methodStarts: MethodStart[]): FetchCallSite[] {
-  const sites: FetchCallSite[] = [];
-  const pattern = /(?<![.\w$])fetch\s*\(/g;
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(masked))) {
-    const openParenIndex = m.index + m[0].length - 1;
-    const args = parseCallArguments(masked, openParenIndex);
-    const line = masked.slice(0, m.index).split("\n").length;
-    const method = findEnclosingMethod(methodStarts, m.index);
+function blankStringLiterals(masked: string): string {
+  const out = masked.split("");
+  const blank = (i: number) => {
+    out[i] = masked[i] === "\n" ? "\n" : " ";
+  };
+  let i = 0;
+  while (i < masked.length) {
+    const ch = masked[i];
 
-    if (!method) {
-      sites.push({ index: m.index, line, method: { name: "(none)", index: -1 }, urlArg: undefined });
+    if (ch === '"' || ch === "'") {
+      i++;
+      while (i < masked.length && masked[i] !== ch) {
+        if (masked[i] === "\\") {
+          blank(i);
+          if (i + 1 < masked.length) blank(i + 1);
+          i += 2;
+          continue;
+        }
+        blank(i);
+        i++;
+      }
+      i++;
       continue;
     }
-    sites.push({ index: m.index, line, method, urlArg: args[0] });
+
+    if (ch === "`") {
+      i++;
+      while (i < masked.length && masked[i] !== "`") {
+        if (masked[i] === "\\") {
+          blank(i);
+          if (i + 1 < masked.length) blank(i + 1);
+          i += 2;
+          continue;
+        }
+        // `${` opens an expression: copy it through verbatim to the matching
+        // brace, so code inside an interpolation stays visible to the scan.
+        if (masked[i] === "$" && masked[i + 1] === "{") {
+          let depth = 0;
+          while (i < masked.length) {
+            if (masked[i] === "{") depth++;
+            else if (masked[i] === "}") {
+              depth--;
+              if (depth === 0) {
+                i++;
+                break;
+              }
+            }
+            i++;
+          }
+          continue;
+        }
+        blank(i);
+        i++;
+      }
+      i++;
+      continue;
+    }
+
+    i++;
+  }
+  return out.join("");
+}
+
+/**
+ * Every occurrence of the identifier `fetch` in `masked` that is not inside a
+ * string literal, each classified as a bare `fetch(` call or not.
+ *
+ * The earlier version of this scan looked for a bare `fetch(` and nothing
+ * else, which quietly made "the shapes I thought to match" the definition of
+ * a network sink: `globalThis.fetch(...)`, `(0, fetch)(...)` and an aliased
+ * `const f = fetch` all reach the network and none of them matched, so a
+ * method using one could build a path by concatenating an unguarded id and
+ * pass all three checks. The pinned site count did not help either — an
+ * unmatched form leaves it unchanged.
+ *
+ * So the rule is inverted. Every textual `fetch` is found, and anything that
+ * is not one of the three reviewed bare calls is a violation on sight. That
+ * makes the allowlist an inventory of approved *occurrences* rather than of
+ * the syntax someone remembered to write a pattern for, and a new spelling
+ * fails loudly instead of passing silently. `fetchAttachment` and friends are
+ * untouched: `\bfetch\b` does not match inside a longer identifier.
+ */
+function findRawFetchCallSites(masked: string, methodStarts: MethodStart[]): FetchCallSite[] {
+  // Indices into codeOnly and masked agree: blankStringLiterals preserves
+  // length, so an argument span found here can be read back off masked, which
+  // still has the real text.
+  const codeOnly = blankStringLiterals(masked);
+  const sites: FetchCallSite[] = [];
+  const pattern = /\bfetch\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = pattern.exec(codeOnly))) {
+    const line = codeOnly.slice(0, m.index).split("\n").length;
+    const method = findEnclosingMethod(methodStarts, m.index) ?? { name: "(none)", index: -1 };
+    const precededByDot = /[.?]\s*$/.test(codeOnly.slice(0, m.index));
+    const callAhead = /^\s*\(/.exec(codeOnly.slice(m.index + "fetch".length));
+
+    if (precededByDot || !callAhead) {
+      sites.push({ index: m.index, line, method, urlArg: undefined, isBareCall: false });
+      continue;
+    }
+
+    const openParenIndex = m.index + "fetch".length + callAhead[0].length - 1;
+    sites.push({
+      index: m.index,
+      line,
+      method,
+      urlArg: parseCallArguments(masked, openParenIndex)[0],
+      isBareCall: true,
+    });
   }
   return sites;
 }
@@ -1070,6 +1192,20 @@ function findRawFetchViolations(source: string): Violation[] {
 
   const violations: Violation[] = [];
   for (const site of sites) {
+    if (!site.isBareCall) {
+      violations.push({
+        line: site.line,
+        method: site.method.name,
+        expr: "(n/a)",
+        template: "fetch",
+        reason:
+          "an occurrence of `fetch` that is not one of the three reviewed bare calls — " +
+          "globalThis.fetch, a fetch stored in a variable, or any other spelling is not an " +
+          "approved network sink, and reaching the network through one would bypass every " +
+          "check in this file",
+      });
+      continue;
+    }
     if (site.method.index === -1) {
       violations.push({
         line: site.line,
@@ -1487,6 +1623,74 @@ describe("raw fetch scanner", () => {
     expect(violations).toHaveLength(1);
     expect(violations[0].method).toBe("fetchSomethingElse");
     expect(violations[0].reason).toMatch(/not on the allowlist/);
+  });
+
+  it("rejects globalThis.fetch, which the old bare-call pattern missed entirely", () => {
+    // The bypass this check was rewritten for. Every other control passes:
+    // the template's only interpolation is the guarded `slug`, there is no
+    // `this.request*` call to start a call-site check from, and the old
+    // `(?<![.\w$])fetch\s*\(` pattern refused to match a property access,
+    // so the dangerous concatenation reached the network unexamined.
+    const source = wrap(`
+  private async fetchWidget(accountSlug: string, boardId: string) {
+    const slug = this.normalizeSlug(accountSlug);
+    const path = \`/\${slug}/boards/\` + boardId;
+    return globalThis.fetch(this.baseUrl + path);
+  }`);
+    expect(findTemplateViolations(source)).toEqual([]);
+    expect(findCallViolations(source)).toEqual([]);
+    const violations = findRawFetchViolations(source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].reason).toMatch(/not one of the three reviewed bare calls/);
+  });
+
+  it("rejects a fetch stored in a variable rather than called outright", () => {
+    // Aliasing separates the reference from the call, so no pattern keyed on
+    // `fetch(` can see the call site. Flagging the reference itself is what
+    // makes the shape of the call stop mattering.
+    const source = wrap(`
+  private async fetchWidget(url: string) {
+    const send = fetch;
+    return send(url);
+  }`);
+    const violations = findRawFetchViolations(source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].reason).toMatch(/not one of the three reviewed bare calls/);
+  });
+
+  it("ignores the word fetch inside a string or a template's literal text", () => {
+    // The real client says `error.message.includes("fetch")` three times and
+    // has a timeout message reading "Attachment fetch timed out". None is a
+    // network sink, and blanking string text is what keeps the inverted rule
+    // from flagging prose.
+    const source = wrap(`
+  private async request(url: string) {
+    try {
+      return await fetch(url);
+    } catch (error) {
+      if (error instanceof TypeError && error.message.includes("fetch")) {
+        throw new Error(\`fetch failed after \${this.timeout}ms\`);
+      }
+      throw error;
+    }
+  }`);
+    // The one real call is a bare call in an unlisted method, so exactly one
+    // violation — not four.
+    const violations = findRawFetchViolations(source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].reason).toMatch(/not on the allowlist/);
+  });
+
+  it("still sees a fetch inside a template interpolation", () => {
+    // Literal text in a template is prose and gets blanked; an expression
+    // inside `${...}` is code and must not be.
+    const source = wrap(`
+  private async fetchWidget(url: string) {
+    return \`result: \${globalThis.fetch(url)}\`;
+  }`);
+    const violations = findRawFetchViolations(source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].reason).toMatch(/not one of the three reviewed bare calls/);
   });
 
   it("accepts the three real call sites' own (method, url) shape", () => {
