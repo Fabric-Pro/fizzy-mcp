@@ -10,22 +10,26 @@
  * `tests/tools/declared-dependencies.test.ts`: TypeScript 7 is the Go port and
  * ships no JavaScript compiler API, so this reads text rather than an AST.
  *
- * **Two independent, additive checks, because each has a blind spot the other
- * covers.**
+ * **Three independent, additive checks, because each has a blind spot the
+ * other two cover.**
  *
  * 1. **The call-site check** (`findCallViolations`) is the primary one, and it
  *    inverts the sweep's original design: instead of looking for template
  *    literals shaped like a path and hoping every path-issuing call happens to
  *    use one, it starts at every call in this file to `this.request<...>(`,
- *    `this.requestAllPages<...>(` and `this.requestWithMeta<...>(` — the only
- *    three ways this file reaches the network — and demands the argument that
- *    supplies the path be provably one of:
+ *    `this.requestAllPages<...>(` and `this.requestWithMeta<...>(` — this
+ *    file's own request layer, and the route almost every method uses to
+ *    reach the network — and demands the argument that supplies the path be
+ *    provably one of:
  *
  *      (a) a template literal whose every `${...}` interpolation is one of the
  *          exemptions below, or a name bound earlier in the *same* method by
  *          `const NAME = assertPathSegment(...)`, `this.normalizeSlug(...)` or
  *          `normalizeAccountSlug(...)` (or the method's own `slug` parameter —
- *          see "the `slug` parameter" below);
+ *          see "the `slug` parameter" below). "Bound" here means bound
+ *          exactly once, at the method's own top level — see the
+ *          duplicate-binding rule below for why a second binding of that name
+ *          anywhere in the method, guarded or not, disqualifies it entirely;
  *      (b) a plain string literal with no interpolation at all (`"/my/identity"`);
  *      (c) a `const` local, bound in the same method, whose initializer is
  *          itself (a) or (b) — including a ternary whose *both* branches are.
@@ -78,22 +82,56 @@
  *    matched the old, narrower rule still starts with `/${` and so still
  *    contains both markers.
  *
+ * 3. **The raw-fetch check** (`findRawFetchViolations`) exists because checks
+ *    1 and 2 share a blind spot neither one covers: this file does not, in
+ *    fact, only reach the network through `this.request`/`requestAllPages`/
+ *    `requestWithMeta`. Three methods — `executeRequestWithMeta`,
+ *    `putBlobToStorage` and `fetchAttachment` — call the global `fetch`
+ *    directly, and nothing about the call-site or template check would notice
+ *    a fourth one added elsewhere, still less one built like this:
+ *
+ *      const path = `/${slug}/boards/` + boardId;
+ *      return fetch(this.baseUrl + path, options);
+ *
+ *    The only recognised template here interpolates the safely-guarded
+ *    `slug`, so the template check passes it clean; the dangerous
+ *    concatenation sits outside that template entirely, and there is no
+ *    `this.request*` call for the call-site check to even start from. Neither
+ *    check's pinned count would move, because neither one ever looked.
+ *
+ *    So this check does not try to re-derive path safety for a raw `fetch` at
+ *    all — that would mean tracing an arbitrary URL expression back through
+ *    whatever built it, exactly the general-purpose data-flow analysis this
+ *    whole sweep avoids. Instead it enumerates every bare `fetch(` call in the
+ *    file, resolves its enclosing method and the exact source text of its URL
+ *    argument, and requires that pair to match one of the hardcoded
+ *    `RAW_FETCH_ALLOWLIST` entries — each one a human judgment call, made
+ *    once, with a comment saying why that specific call is safe. A call in an
+ *    unlisted method, or one whose URL expression no longer matches what the
+ *    entry names (the same method reusing a different variable, say), is a
+ *    violation with no escape hatch, exactly like the other two checks. The
+ *    allowlist's own *count* is pinned too, at 3: a fourth `fetch` anywhere in
+ *    the file fails the suite even if it happens to reuse an
+ *    already-allowlisted method and expression, which the allowlist match
+ *    alone would not catch.
+ *
  * **Design is default-deny, and picks a direction to be wrong in.** Borrowed
  * directly from declared-dependencies.test.ts: a guard that quietly misses a
  * case stops guarding and nobody finds out; a guard that flags one case too
- * many fails loudly and is fixed in a minute. Both checks here are built to
- * make the second mistake, never the first — an expression shape neither
+ * many fails loudly and is fixed in a minute. All three checks here are built
+ * to make the second mistake, never the first — an expression shape neither
  * recognises is a violation, not a pass.
  *
- * **Two independent counts are pinned**, not just the "no violations" result:
- * the number of path-shaped templates (54) and the number of in-scope
- * request-issuing call sites (52). A silent scanning regression — a shape
- * that stops matching — would otherwise still report zero violations over
- * fewer things checked. Pinning the *count* each scan actually walked is what
- * turns "found nothing wrong" into "found nothing wrong in the right number of
- * places"; a new call site or template changes one of these numbers no matter
- * which construction shape it uses, and the count assertion is what catches
- * that even before the safety assertion would.
+ * **Three independent counts are pinned**, not just the "no violations"
+ * result: the number of path-shaped templates (54), the number of in-scope
+ * request-issuing call sites (52), and the number of raw `fetch` call sites
+ * (3). A silent scanning regression — a shape that stops matching — would
+ * otherwise still report zero violations over fewer things checked. Pinning
+ * the *count* each scan actually walked is what turns "found nothing wrong"
+ * into "found nothing wrong in the right number of places"; a new call site,
+ * template or raw `fetch` changes one of these numbers no matter which
+ * construction shape it uses, and the count assertion is what catches that
+ * even before the safety assertion would.
  *
  * **The `slug` parameter.** `attachmentPath` takes an already-normalized slug
  * as a parameter literally named `slug` (never `accountSlug`) rather than
@@ -118,22 +156,59 @@
  * real gap in this scanner's design, not something to paper over by adding
  * `let` back into the pattern.
  *
- * **What neither check can see.** Both read text, not an AST, so a shape
+ * **A name is trusted only if `const` binds it exactly once, at the method's
+ * own top level.** `isProvenSafe` and `resolveConstInitializer` originally
+ * searched all earlier text in the method for `const NAME = ...` with no
+ * awareness of block scope, which let this pass while interpolating an
+ * unguarded value:
+ *
+ *      const board = boardId;
+ *      if (condition) {
+ *        const board = assertPathSegment(boardId, "board_id");
+ *      }
+ *      return this.request("GET", `/${slug}/boards/${board}`);
+ *
+ * At the interpolation, `board` is lexically the outer, raw binding — but a
+ * flat text search just finds whichever `const board = ...` it runs into,
+ * which here is the inner, guarded one sitting in a block that has already
+ * closed. Real scope tracking would fix this properly, but text has no notion
+ * of "which block am I in" without effectively reimplementing a parser.
+ * Instead, both functions require that a name used in a proven position is
+ * bound by `const` **exactly once** anywhere in the method, and that its one
+ * binding sits at the method body's own top level — brace depth 1, counting
+ * `{`/`}` from the method's own start. That depth is always the body's own
+ * level regardless of how many balanced brace pairs precede it (a return-type
+ * object literal, a destructured parameter default), since those must already
+ * balance for the file to compile. A second binding of that name anywhere in
+ * the method — nested or not, guarded or not — is a violation, whatever the
+ * scopes involved, and so is a lone binding that is itself nested. That is
+ * strictly safer than tracking scopes, far simpler to get right in text, and
+ * costs nothing in practice: the client binds each guarded name once, at the
+ * top of the method.
+ *
+ * **What neither check can see.** All three read text, not an AST, so a shape
  * outside what is enumerated above is a violation rather than a considered
  * "no" — that is deliberate, but it also means a genuinely new *safe* shape
  * (a third kind of guard function, a `switch` instead of a ternary, two levels
- * of `const` chaining) will fail here and need this file extended, not just
- * the production code. Neither check follows a value across methods or files:
- * a guard applied in one method never covers a use in another, and a path
- * built by something other than `fizzy-client.ts` — a caller of this client,
- * or Fizzy's own server-side routing — is out of scope entirely. The
- * interpolation regex (`\$\{([^}]*)\}`) stops at the first `}`, so an
- * interpolation containing its own object literal would be split wrong; no
- * such interpolation exists in this file today. And neither check re-verifies
+ * of `const` chaining, a name that legitimately needs binding more than once)
+ * will fail here and need this file extended, not just the production code.
+ * None of the three follows a value across methods or files: a guard applied
+ * in one method never covers a use in another, and a path built by something
+ * other than `fizzy-client.ts` — a caller of this client, or Fizzy's own
+ * server-side routing — is out of scope entirely. The interpolation regex
+ * (`\$\{([^}]*)\}`) stops at the first `}`, so an interpolation containing its
+ * own object literal would be split wrong; no such interpolation exists in
+ * this file today. Neither the call-site nor the template check re-verifies
  * that `assertPathSegment`, `normalizeSlug` or `normalizeAccountSlug`
  * themselves reject what they claim to — only that they were called; their
  * own correctness is `src/utils/path-segment.ts`'s tests to own, not this
- * file's.
+ * file's. And the raw-fetch check re-verifies nothing about *why* an
+ * allowlisted call is safe — `RAW_FETCH_ALLOWLIST`'s `reason` field is a
+ * human judgment call written once, not a claim this scanner checks. It only
+ * confirms the call site's method and URL expression still match what was
+ * reviewed, so a rewritten (but still textually matching) implementation of
+ * an allowlisted method could in principle drift unsafe without tripping this
+ * check at all.
  */
 
 import { describe, it, expect } from "vitest";
@@ -188,6 +263,14 @@ interface RequestCallSite {
   callee: RequestMethodName;
   method: MethodStart;
   pathArg: Span | undefined;
+}
+
+/** One bare `fetch(` call in fizzy-client.ts, with its URL argument (if found). */
+interface FetchCallSite {
+  index: number;
+  line: number;
+  method: MethodStart;
+  urlArg: Span | undefined;
 }
 
 interface Violation {
@@ -298,6 +381,23 @@ function findEnclosingMethod(methodStarts: MethodStart[], index: number): Method
   return best;
 }
 
+/**
+ * Where `method`'s own extent ends in `masked`: the next method's start, or
+ * the end of the source if `method` is the last one. Used only to bound the
+ * duplicate-binding search below — like `findMethodStarts` itself, this does
+ * not need to be the method's *true* end (see that function's doc comment on
+ * why finding a true end is unreliable from text); the next declaration's
+ * start is a safe upper bound because nothing belonging to `method` can sit
+ * past it.
+ */
+function methodExtentEnd(methodStarts: MethodStart[], method: MethodStart, sourceLength: number): number {
+  let end = sourceLength;
+  for (const start of methodStarts) {
+    if (start.index > method.index && start.index < end) end = start.index;
+  }
+  return end;
+}
+
 /** The index right after `class FizzyClient { ... {`'s opening brace, in `masked`. */
 function classBodyStartOf(masked: string): number {
   const classMatch = /class\s+FizzyClient\b[^{]*\{/.exec(masked);
@@ -340,14 +440,89 @@ function findPathTemplates(masked: string): PathTemplate[] {
 }
 
 /**
+ * Raw `{`/`}` nesting depth at `position`, counting from `from` (normally a
+ * method's own start). A quoted string or backtick template — including a
+ * template's own `${...}` interpolation braces — is skipped wholesale via
+ * `skipQuoted` rather than scanned character by character, so an
+ * interpolation's braces are never mistaken for statement-level nesting.
+ *
+ * Depth 1 is always the level of the method body's own top-level statements,
+ * regardless of what precedes the body's opening `{`: a return-type object
+ * literal (`Promise<{ data: T }>`) or a destructured parameter's default
+ * value contributes its own balanced `{`/`}` pair, and a balanced pair nets
+ * to zero by definition — the file would not compile otherwise. So whatever
+ * brace pairs appear in a signature, raw depth is back to 0 by the time the
+ * body's real opening `{` is reached, and that brace brings it to 1. This is
+ * what lets the duplicate-binding rule below identify "top level of the
+ * method body" without first solving the harder problem (noted in
+ * `findMethodStarts`'s doc comment) of locating that opening brace directly.
+ */
+function braceDepthAt(masked: string, from: number, position: number): number {
+  let depth = 0;
+  let i = from;
+  while (i < position) {
+    const ch = masked[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      i = skipQuoted(masked, i);
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") depth--;
+    i++;
+  }
+  return depth;
+}
+
+/**
+ * Every `const NAME` declaration bound anywhere in `method` (from its start
+ * to `methodEnd`), regardless of nesting — used to enforce the
+ * duplicate-binding rule from the module doc comment: a name is trusted only
+ * when this list has exactly one entry, and that entry sits at brace depth 1
+ * (the method body's own top level, per `braceDepthAt`). Returns null rather
+ * than picking a "best" candidate when zero or more than one binding exists,
+ * so callers never have to guess which of several same-named declarations is
+ * the one actually in scope at a use site — a question a text scanner cannot
+ * answer reliably, which is exactly what made the old "last declaration
+ * wins" behavior unsafe.
+ */
+function findSoleConstBinding(
+  masked: string,
+  method: MethodStart,
+  methodEnd: number,
+  name: string
+): { index: number; depth: number } | null {
+  const pattern = new RegExp(`\\bconst\\s+${name}\\b`, "g");
+  pattern.lastIndex = method.index;
+  const indices: number[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(masked)) && match.index < methodEnd) {
+    indices.push(match.index);
+  }
+  if (indices.length !== 1) return null;
+  const index = indices[0];
+  return { index, depth: braceDepthAt(masked, method.index, index) };
+}
+
+/**
  * Whether `expr`, interpolated inside `method` at `boundary`, is provably
  * safe — rule (a) or (b) from the module doc comment above. `boundary` is the
  * position `expr`'s guard must textually precede — the start of the template
  * or call argument it appears in, not necessarily the position of `${expr}`
  * itself, matching how a `const` guard must precede the whole statement that
  * uses it, not just the one interpolation.
+ *
+ * `methodStarts` is needed only to bound the duplicate-binding search to this
+ * method's own extent (`methodExtentEnd`) — see the "trusted only if bound
+ * exactly once" rule in the module doc comment for why a name bound more than
+ * once anywhere in the method, not just before `boundary`, is disqualified.
  */
-function isProvenSafe(masked: string, method: MethodStart, boundary: number, expr: string): boolean {
+function isProvenSafe(
+  masked: string,
+  method: MethodStart,
+  boundary: number,
+  expr: string,
+  methodStarts: MethodStart[]
+): boolean {
   if (EXEMPT_NAMES.has(expr)) return true;
 
   // Only a bare identifier can be traced to a local binding; a property
@@ -355,12 +530,21 @@ function isProvenSafe(masked: string, method: MethodStart, boundary: number, exp
   // fails outright.
   if (!/^[A-Za-z_$][\w$]*$/.test(expr)) return false;
 
-  const window = masked.slice(method.index, boundary);
-  // `const` only — see "let is never a guard" in the module doc comment.
-  const guardPattern = new RegExp(
-    `\\bconst\\s+${expr}\\s*=\\s*(?:assertPathSegment|this\\.normalizeSlug|normalizeAccountSlug)\\s*\\(`
-  );
-  if (guardPattern.test(window)) return true;
+  const methodEnd = methodExtentEnd(methodStarts, method, masked.length);
+  const binding = findSoleConstBinding(masked, method, methodEnd, expr);
+  // The binding must both be the method's only one and precede `boundary` —
+  // `const` is block-scoped, so a binding after the use point could not
+  // actually be in scope there even if it were the sole one found.
+  if (binding && binding.depth === 1 && binding.index < boundary) {
+    const fromBinding = masked.slice(binding.index, boundary);
+    // `const` only — see "let is never a guard" in the module doc comment.
+    // Anchored to the binding's own start (rather than searched for anywhere
+    // in a window) now that there is exactly one candidate to check.
+    const guardPattern = new RegExp(
+      `^const\\s+${expr}\\s*=\\s*(?:assertPathSegment|this\\.normalizeSlug|normalizeAccountSlug)\\s*\\(`
+    );
+    if (guardPattern.test(fromBinding)) return true;
+  }
 
   // The `slug` parameter carve-out described in the module doc comment,
   // narrowly matched on the exact name and a `slug: string` parameter
@@ -393,7 +577,7 @@ function findTemplateViolations(source: string): Violation[] {
       continue;
     }
     for (const { expr } of template.interpolations) {
-      if (isProvenSafe(masked, method, template.index, expr)) continue;
+      if (isProvenSafe(masked, method, template.index, expr, methodStarts)) continue;
       violations.push({
         line: template.line,
         method: method.name,
@@ -600,26 +784,39 @@ function splitTopLevelTernary(text: string): { branch1: string; branch2: string 
 }
 
 /**
- * Find `const name = <initializer>;`, the last such declaration textually
- * before `positionOfUse` in `method` — i.e. the one actually in scope at the
- * use — and return its initializer's text and start index. `let` never
- * matches: see "`let` is never a guard" in the module doc comment. Returns
- * null when no qualifying declaration exists in this method.
+ * Find `const name = <initializer>;`, the sole such declaration bound
+ * anywhere in `method` and sitting at the method body's own top level, and
+ * return its initializer's text and start index. Returns null when zero or
+ * more than one `const name` binding exists in the method (the
+ * duplicate-binding rule in the module doc comment), when the sole binding is
+ * nested rather than top-level, or when it does not textually precede
+ * `positionOfUse` — `const` is block-scoped, so a binding after the use point
+ * is not in scope there regardless of how many bindings exist. `let` never
+ * matches: see "`let` is never a guard" in the module doc comment.
+ *
+ * This used to take the *last* textual `const name = ...` before
+ * `positionOfUse`, with no regard for whether it sat in a block that had
+ * already closed — exactly the flaw the module doc comment's shadowing
+ * example describes, just for `path` instead of `board`. Requiring a single,
+ * top-level binding closes it the same way `isProvenSafe` closes it for a
+ * direct interpolation.
  */
 function resolveConstInitializer(
   masked: string,
   method: MethodStart,
   positionOfUse: number,
-  name: string
+  name: string,
+  methodStarts: MethodStart[]
 ): Span | null {
-  const window = masked.slice(method.index, positionOfUse);
-  const declPattern = new RegExp(`\\bconst\\s+${name}\\s*=\\s*`, "g");
-  let match: RegExpExecArray | null;
-  let last: RegExpExecArray | null = null;
-  while ((match = declPattern.exec(window))) last = match;
-  if (!last) return null;
+  const methodEnd = methodExtentEnd(methodStarts, method, masked.length);
+  const binding = findSoleConstBinding(masked, method, methodEnd, name);
+  if (!binding || binding.depth !== 1 || binding.index >= positionOfUse) return null;
 
-  const initStart = method.index + last.index + last[0].length;
+  const declPattern = new RegExp(`^const\\s+${name}\\s*=\\s*`);
+  const match = declPattern.exec(masked.slice(binding.index));
+  if (!match) return null; // e.g. a type annotation between the name and `=`
+
+  const initStart = binding.index + match[0].length;
   const semicolonIndex = findTopLevelSemicolon(masked, initStart);
   if (semicolonIndex === -1) return null;
   return sliceTrimmed(masked, initStart, semicolonIndex);
@@ -652,7 +849,8 @@ function classifyPathExpr(
   text: string,
   boundary: number,
   allowTernary: boolean,
-  allowIdentifier: boolean
+  allowIdentifier: boolean,
+  methodStarts: MethodStart[]
 ): Classification {
   if (text.length === 0) return { ok: false, reason: "empty path argument" };
 
@@ -662,7 +860,7 @@ function classifyPathExpr(
     }
     const interpolations = [...text.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1].trim());
     for (const expr of interpolations) {
-      if (!isProvenSafe(masked, method, boundary, expr)) {
+      if (!isProvenSafe(masked, method, boundary, expr, methodStarts)) {
         return {
           ok: false,
           reason: `interpolation \${${expr}} is not a locally-guarded value and not on the exemption list`,
@@ -682,23 +880,23 @@ function classifyPathExpr(
   if (allowTernary) {
     const split = splitTopLevelTernary(text);
     if (split) {
-      const left = classifyPathExpr(masked, method, split.branch1, boundary, false, false);
+      const left = classifyPathExpr(masked, method, split.branch1, boundary, false, false, methodStarts);
       if (!left.ok) return { ok: false, reason: `ternary "then" branch: ${left.reason}` };
-      const right = classifyPathExpr(masked, method, split.branch2, boundary, false, false);
+      const right = classifyPathExpr(masked, method, split.branch2, boundary, false, false, methodStarts);
       if (!right.ok) return { ok: false, reason: `ternary "else" branch: ${right.reason}` };
       return { ok: true };
     }
   }
 
   if (allowIdentifier && /^[A-Za-z_$][\w$]*$/.test(text)) {
-    const resolved = resolveConstInitializer(masked, method, boundary, text);
+    const resolved = resolveConstInitializer(masked, method, boundary, text, methodStarts);
     if (!resolved) {
       return {
         ok: false,
-        reason: `bare identifier "${text}" does not resolve to a \`const ${text} = ...\` bound earlier in this method`,
+        reason: `bare identifier "${text}" does not resolve to a \`const ${text} = ...\` bound exactly once, at top level, earlier in this method`,
       };
     }
-    return classifyPathExpr(masked, method, resolved.text, resolved.start, true, false);
+    return classifyPathExpr(masked, method, resolved.text, resolved.start, true, false, methodStarts);
   }
 
   return {
@@ -767,7 +965,15 @@ function findCallViolations(source: string): Violation[] {
       });
       continue;
     }
-    const result = classifyPathExpr(masked, site.method, site.pathArg.text, site.pathArg.start, true, true);
+    const result = classifyPathExpr(
+      masked,
+      site.method,
+      site.pathArg.text,
+      site.pathArg.start,
+      true,
+      true,
+      methodStarts
+    );
     if (!result.ok) {
       violations.push({
         line: site.line,
@@ -775,6 +981,125 @@ function findCallViolations(source: string): Violation[] {
         expr: site.pathArg.text,
         template: `this.${site.callee}(...)`,
         reason: result.reason ?? "not provably safe",
+      });
+    }
+  }
+  return violations;
+}
+
+// ============ The raw-fetch scan ============
+//
+// This file's request layer is not the only route to the network: a handful
+// of methods call the global `fetch` directly. Check 3 in the module doc
+// comment covers why those need their own check — the call-site and template
+// checks above only ever look at `this.request*` calls and path-shaped
+// templates, so a raw `fetch` fed a concatenated, unguarded id would sail
+// past both in silence.
+
+/**
+ * Every bare `fetch(` call in `masked` — not `this.request*`, not
+ * `something.fetch(` — with its first (URL) argument located. The negative
+ * lookbehind excludes a method call on some other object ending in `fetch`
+ * and a hypothetical `this.fetch(`, neither of which occurs in this file
+ * today; a plain identifier call is the only shape actually present at the
+ * three real sites.
+ */
+function findRawFetchCallSites(masked: string, methodStarts: MethodStart[]): FetchCallSite[] {
+  const sites: FetchCallSite[] = [];
+  const pattern = /(?<![.\w$])fetch\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = pattern.exec(masked))) {
+    const openParenIndex = m.index + m[0].length - 1;
+    const args = parseCallArguments(masked, openParenIndex);
+    const line = masked.slice(0, m.index).split("\n").length;
+    const method = findEnclosingMethod(methodStarts, m.index);
+
+    if (!method) {
+      sites.push({ index: m.index, line, method: { name: "(none)", index: -1 }, urlArg: undefined });
+      continue;
+    }
+    sites.push({ index: m.index, line, method, urlArg: args[0] });
+  }
+  return sites;
+}
+
+/**
+ * Every raw `fetch(` call this file is allowed to make, keyed by the
+ * enclosing method's name and the exact source text of the URL argument.
+ * Each entry is a human judgment call made once, with a `reason` recording
+ * why that specific call is safe — see "what neither check can see" in the
+ * module doc comment for the limits of what re-checking this list actually
+ * proves. A call whose method or URL expression doesn't match one of these
+ * exactly is a violation on its own; the pinned site count below additionally
+ * catches a call that coincidentally matches an entry it shouldn't (a second
+ * `fetch` added to an already-allowlisted method, reusing that method's own
+ * `url` local).
+ */
+const RAW_FETCH_ALLOWLIST: ReadonlyArray<{ method: string; urlExpr: string; reason: string }> = [
+  {
+    method: "executeRequestWithMeta",
+    urlExpr: "url",
+    reason:
+      "url is this method's own parameter; its only caller, requestWithMeta, " +
+      "builds it as `${this.baseUrl}${path}`, where path is the same argument " +
+      "the call-site check above proves safe at every call to requestWithMeta.",
+  },
+  {
+    method: "putBlobToStorage",
+    urlExpr: "url",
+    reason:
+      "url is a method parameter carrying the signed direct-upload URL " +
+      "Fizzy's own direct_uploads response returned — not a path this client " +
+      "builds or interpolates.",
+  },
+  {
+    method: "fetchAttachment",
+    urlExpr: "url",
+    reason:
+      "url starts from attachmentPath(), which the template check above " +
+      "proves, and is only ever replaced by resolveAttachmentRedirect's " +
+      "vetted http(s) Location — never by concatenating an unguarded id.",
+  },
+];
+
+/** Run the raw-fetch sweep over `source`, returning every violation found. */
+function findRawFetchViolations(source: string): Violation[] {
+  const masked = blankComments(source);
+  const methodStarts = findMethodStarts(masked, classBodyStartOf(masked));
+  const sites = findRawFetchCallSites(masked, methodStarts);
+
+  const violations: Violation[] = [];
+  for (const site of sites) {
+    if (site.method.index === -1) {
+      violations.push({
+        line: site.line,
+        method: "(none)",
+        expr: "(n/a)",
+        template: "fetch(...)",
+        reason: "raw fetch call could not be attributed to any method",
+      });
+      continue;
+    }
+    if (!site.urlArg) {
+      violations.push({
+        line: site.line,
+        method: site.method.name,
+        expr: "(n/a)",
+        template: "fetch(...)",
+        reason: "fetch call is missing its URL argument",
+      });
+      continue;
+    }
+    const allowed = RAW_FETCH_ALLOWLIST.some(
+      (entry) => entry.method === site.method.name && entry.urlExpr === site.urlArg!.text
+    );
+    if (!allowed) {
+      violations.push({
+        line: site.line,
+        method: site.method.name,
+        expr: site.urlArg.text,
+        template: "fetch(...)",
+        reason: `raw fetch in ${site.method.name} is not on the allowlist for URL expression \`${site.urlArg.text}\``,
       });
     }
   }
@@ -932,6 +1257,48 @@ describe("template scanner", () => {
   }`);
     expect(findTemplateViolations(source)).toEqual([]);
   });
+
+  it("rejects a name shadowed by an outer, unguarded binding of the same name", () => {
+    // Finding 1's exact shape: `board` is bound twice, once raw at the
+    // method's own top level and once guarded inside a block that has
+    // already closed by the time the template interpolates it. At the
+    // interpolation, `board` is lexically the outer, unguarded binding — a
+    // flat text search that just looks for "some `const board = ...`
+    // earlier in the method" finds the guarded one instead and wrongly
+    // passes it. Requiring the name be bound exactly once anywhere in the
+    // method closes that without tracking scope at all.
+    const source = wrap(`
+  async getBoard(accountSlug: string, boardId: string) {
+    const slug = this.normalizeSlug(accountSlug);
+    const board = boardId;
+    if (accountSlug.length > 0) {
+      const board = assertPathSegment(boardId, "board_id");
+    }
+    return this.request("GET", \`/\${slug}/boards/\${board}\`);
+  }`);
+    const violations = findTemplateViolations(source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ method: "getBoard", expr: "board" });
+  });
+
+  it("rejects a name bound twice at the method's own top level", () => {
+    // Two top-level `const board` declarations would not compile as real
+    // TypeScript (`Cannot redeclare block-scoped variable`), but the rule
+    // does not special-case nesting: it treats every duplicate the same way,
+    // guarded or not, nested or not, because a text scanner has no reliable
+    // way to tell "this duplicate is harmless" from "this duplicate is the
+    // attack" without doing real scope analysis.
+    const source = wrap(`
+  async getBoard(accountSlug: string, boardId: string) {
+    const slug = this.normalizeSlug(accountSlug);
+    const board = assertPathSegment(boardId, "board_id");
+    const board = assertPathSegment(boardId, "board_id");
+    return this.request("GET", \`/\${slug}/boards/\${board}\`);
+  }`);
+    const violations = findTemplateViolations(source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ method: "getBoard", expr: "board" });
+  });
 });
 
 describe("call-site scanner", () => {
@@ -1001,6 +1368,30 @@ describe("call-site scanner", () => {
     expect(violations[0].reason).toMatch(/does not resolve/);
   });
 
+  it("rejects a shadowed const path resolved through a decoy declaration in a closed block", () => {
+    // resolveConstInitializer's version of Finding 1: `path` is bound twice —
+    // an outer one built straight from the unguarded boardId, and an inner,
+    // safe-looking one sitting in a block that has already closed by the
+    // time `path` is actually used. The old "last textual declaration wins"
+    // behavior picked the inner decoy and called `path` safe, even though
+    // the outer, unguarded binding is what is actually in scope at the
+    // `request` call.
+    const source = wrap(`
+  async getBoard(accountSlug: string, boardId: string): Promise<unknown> {
+    const slug = this.normalizeSlug(accountSlug);
+    const board = assertPathSegment(boardId, "board_id");
+    const path = \`/\${slug}/boards/\${boardId}\`;
+    if (accountSlug.length > 0) {
+      const path = \`/\${slug}/boards/\${board}\`;
+    }
+    return this.request("GET", path);
+  }`);
+    const violations = findCallViolations(source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].method).toBe("getBoard");
+    expect(violations[0].reason).toMatch(/does not resolve/);
+  });
+
   it("accepts a const path bound to a ternary of two guarded templates", () => {
     // getNotifications's real shape: page 1 must stay page-less, so the path
     // is chosen by a ternary rather than always carrying a query string.
@@ -1055,6 +1446,67 @@ describe("call-site scanner", () => {
   });
 });
 
+describe("raw fetch scanner", () => {
+  // Check 3 in the module doc comment: a raw `fetch(` call reaches the
+  // network without ever going through `this.request*`, so it is invisible
+  // to both scanners above no matter how its URL was built. These fixtures
+  // exercise findRawFetchViolations directly, the same way the two describe
+  // blocks above exercise their own scanners.
+  const wrap = (body: string) => `class FizzyClient {\n${body}\n}\n`;
+
+  it("rejects a raw fetch whose URL is built by concatenating an unguarded id", () => {
+    // The exact shape from the module doc comment. The template's only
+    // interpolation is the guarded `slug`, so the template check sees
+    // nothing wrong with it in isolation — the danger is the `+ boardId`
+    // concatenation sitting outside the template entirely, reaching the
+    // network through a raw fetch that the call-site check never starts
+    // from (there is no `this.request*` call here at all).
+    const source = wrap(`
+  private async fetchWidget(accountSlug: string, boardId: string) {
+    const slug = this.normalizeSlug(accountSlug);
+    const path = \`/\${slug}/boards/\` + boardId;
+    return fetch(this.baseUrl + path, { method: "GET" });
+  }`);
+    expect(findTemplateViolations(source)).toEqual([]);
+    expect(findCallViolations(source)).toEqual([]);
+    const violations = findRawFetchViolations(source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].method).toBe("fetchWidget");
+  });
+
+  it("rejects a raw fetch in a method that is not on the allowlist", () => {
+    // Even a `url` built exactly the way the three real, allowlisted call
+    // sites build theirs is not enough on its own — the method it's called
+    // from has to match too, since the allowlist is a (method, expression)
+    // pair, not a bare expression shape.
+    const source = wrap(`
+  private async fetchSomethingElse(url: string) {
+    return fetch(url, { method: "GET" });
+  }`);
+    const violations = findRawFetchViolations(source);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].method).toBe("fetchSomethingElse");
+    expect(violations[0].reason).toMatch(/not on the allowlist/);
+  });
+
+  it("accepts the three real call sites' own (method, url) shape", () => {
+    const source = wrap(`
+  private async executeRequestWithMeta(method: string, url: string) {
+    return fetch(url, { method });
+  }
+
+  private async putBlobToStorage(url: string, headers: Record<string, string>) {
+    return fetch(url, { method: "PUT" });
+  }
+
+  async fetchAttachment(accountSlug: string, ref: unknown): Promise<unknown> {
+    let url = "https://storage.example.com/blob";
+    return fetch(url, { method: "GET" });
+  }`);
+    expect(findRawFetchViolations(source)).toEqual([]);
+  });
+});
+
 describe("path segment guards on FizzyClient", () => {
   const source = readFileSync(clientPath, "utf8");
 
@@ -1100,6 +1552,29 @@ describe("path segment guards on FizzyClient", () => {
         .map((v) => `  line ${v.line} (${v.method}): ${v.template} argument \`${v.expr}\` — ${v.reason}`)
         .join("\n");
       throw new Error(`Unproven request path argument(s) found:\n${details}`);
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("finds the raw fetch calls the real file actually has", () => {
+    // Guards the raw-fetch sweep the same way the two counts above guard
+    // their own scans: a pattern that stopped matching `fetch(` would make
+    // the allowlist assertion below pass vacuously over zero call sites. 3 is
+    // executeRequestWithMeta, putBlobToStorage and fetchAttachment — see
+    // check 3 in the module doc comment.
+    const masked = blankComments(source);
+    const methodStarts = findMethodStarts(masked, classBodyStartOf(masked));
+    const sites = findRawFetchCallSites(masked, methodStarts);
+    expect(sites.length).toBe(3);
+  });
+
+  it("proves every raw fetch call is on the allowlist", () => {
+    const violations = findRawFetchViolations(source);
+    if (violations.length > 0) {
+      const details = violations
+        .map((v) => `  line ${v.line} (${v.method}): ${v.template} argument \`${v.expr}\` — ${v.reason}`)
+        .join("\n");
+      throw new Error(`Unallowlisted raw fetch call(s) found:\n${details}`);
     }
     expect(violations).toEqual([]);
   });
