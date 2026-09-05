@@ -229,6 +229,33 @@ describe("FizzyClient", () => {
     });
   });
 
+  describe("path segment validation", () => {
+    // Every other caller-supplied id — board_id, card_id, card_number,
+    // comment_id, step_id, column_id, user_id, notification_id, reaction_id —
+    // is interpolated into a request path the same way account_slug is, so it
+    // needs the same containment guard (see utils/path-segment.ts). Checked
+    // against one method per guarded id name so the guard is shown to be
+    // applied broadly, not just on getBoard; the rule itself has its own
+    // suite in tests/utils/path-segment.test.ts, and the sweep in
+    // tests/client/path-segments.test.ts proves every call site uses it.
+    it.each([
+      ["a traversal", "../cards/42"],
+      ["an embedded separator", "123/456"],
+      ["a parent directory", ".."],
+    ])("rejects %s in every guarded id without issuing a request", async (_label, id) => {
+      await expect(client.getBoard("123456", id)).rejects.toThrow(/board_id/);
+      await expect(client.getCard("123456", id)).rejects.toThrow(/card_id/);
+      await expect(client.closeCard("123456", id)).rejects.toThrow(/card_number/);
+      await expect(client.getComment("123456", "1", id)).rejects.toThrow(/comment_id/);
+      await expect(client.getStep("123456", "1", id)).rejects.toThrow(/step_id/);
+      await expect(client.getColumn("123456", "1", id)).rejects.toThrow(/column_id/);
+      await expect(client.getUser("123456", id)).rejects.toThrow(/user_id/);
+      await expect(client.markNotificationAsRead("123456", id)).rejects.toThrow(/notification_id/);
+      await expect(client.removeReaction("123456", "1", "1", id)).rejects.toThrow(/reaction_id/);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe("authentication", () => {
     it("should include Bearer token in Authorization header", async () => {
       mockFetch.mockResolvedValueOnce({

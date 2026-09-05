@@ -48,6 +48,7 @@ import {
 } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import { normalizeAccountSlug } from "../utils/account-slug.js";
+import { assertPathSegment } from "../utils/path-segment.js";
 import { ETagCache } from "../utils/etag-cache.js";
 import { md5Base64 } from "../utils/md5.js";
 
@@ -696,7 +697,8 @@ export class FizzyClient {
    */
   async getBoard(accountSlug: string, boardId: string): Promise<FizzyBoard> {
     const slug = this.normalizeSlug(accountSlug);
-    return this.request<FizzyBoard>("GET", `/${slug}/boards/${boardId}`);
+    const board = assertPathSegment(boardId, "board_id");
+    return this.request<FizzyBoard>("GET", `/${slug}/boards/${board}`);
   }
 
   /**
@@ -725,7 +727,8 @@ export class FizzyClient {
     data: UpdateBoardRequest
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("PUT", `/${slug}/boards/${boardId}`, {
+    const board = assertPathSegment(boardId, "board_id");
+    await this.request<void>("PUT", `/${slug}/boards/${board}`, {
       board: data,
     });
   }
@@ -737,7 +740,8 @@ export class FizzyClient {
    */
   async deleteBoard(accountSlug: string, boardId: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("DELETE", `/${slug}/boards/${boardId}`);
+    const board = assertPathSegment(boardId, "board_id");
+    await this.request<void>("DELETE", `/${slug}/boards/${board}`);
   }
 
   // ============ Cards ============
@@ -756,7 +760,12 @@ export class FizzyClient {
     options?: CardListOptions
   ): Promise<CardsPage> {
     const slug = this.normalizeSlug(accountSlug);
+    // queryString is built internally by buildQueryString from the filter
+    // options, not spliced together from caller text, and deliberately carries
+    // `?`/`&` — it needs no path-segment guard.
     const queryString = options ? this.buildQueryString(options) : "";
+    // requestedPage is a number (CardListOptions.page), checked below to be a
+    // safe positive integer, so it needs no path-segment guard either.
     const requestedPage = options?.page ?? 1;
 
     // The tool layer validates `page` separately; this defends direct client callers.
@@ -797,7 +806,11 @@ export class FizzyClient {
    */
   async getCard(accountSlug: string, cardId: string): Promise<FizzyCard> {
     const slug = this.normalizeSlug(accountSlug);
-    return this.request<FizzyCard>("GET", `/${slug}/cards/${cardId}`);
+    // Guarded as an opaque path segment, not a pinned shape — the /cards/:id
+    // route actually resolves by number, not by this "card_id" (see the note
+    // in utils/path-segment.ts), so there is no single shape to pin here.
+    const card = assertPathSegment(cardId, "card_id");
+    return this.request<FizzyCard>("GET", `/${slug}/cards/${card}`);
   }
 
   /**
@@ -811,9 +824,10 @@ export class FizzyClient {
     data: CreateCardRequest
   ): Promise<FizzyCard> {
     const slug = this.normalizeSlug(accountSlug);
+    const board = assertPathSegment(boardId, "board_id");
     return this.request<FizzyCard>(
       "POST",
-      `/${slug}/boards/${boardId}/cards`,
+      `/${slug}/boards/${board}/cards`,
       { card: data }
     );
   }
@@ -829,7 +843,9 @@ export class FizzyClient {
     data: UpdateCardRequest
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("PUT", `/${slug}/cards/${cardId}`, {
+    // See getCard: guarded as an opaque path segment, not a pinned shape.
+    const card = assertPathSegment(cardId, "card_id");
+    await this.request<void>("PUT", `/${slug}/cards/${card}`, {
       card: data,
     });
   }
@@ -841,7 +857,9 @@ export class FizzyClient {
    */
   async deleteCard(accountSlug: string, cardId: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("DELETE", `/${slug}/cards/${cardId}`);
+    // See getCard: guarded as an opaque path segment, not a pinned shape.
+    const card = assertPathSegment(cardId, "card_id");
+    await this.request<void>("DELETE", `/${slug}/cards/${card}`);
   }
 
   // ============ Card Actions ============
@@ -853,7 +871,8 @@ export class FizzyClient {
    */
   async closeCard(accountSlug: string, cardNumber: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("POST", `/${slug}/cards/${cardNumber}/closure`);
+    const card = assertPathSegment(cardNumber, "card_number");
+    await this.request<void>("POST", `/${slug}/cards/${card}/closure`);
   }
 
   /**
@@ -863,7 +882,8 @@ export class FizzyClient {
    */
   async reopenCard(accountSlug: string, cardNumber: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("DELETE", `/${slug}/cards/${cardNumber}/closure`);
+    const card = assertPathSegment(cardNumber, "card_number");
+    await this.request<void>("DELETE", `/${slug}/cards/${card}/closure`);
   }
 
   /**
@@ -873,7 +893,8 @@ export class FizzyClient {
    */
   async moveCardToNotNow(accountSlug: string, cardNumber: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("POST", `/${slug}/cards/${cardNumber}/not_now`);
+    const card = assertPathSegment(cardNumber, "card_number");
+    await this.request<void>("POST", `/${slug}/cards/${card}/not_now`);
   }
 
   /**
@@ -887,9 +908,12 @@ export class FizzyClient {
     columnId: string
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    // columnId is sent in the JSON body, not interpolated into the path, so it
+    // needs no guard here.
     await this.request<void>(
       "POST",
-      `/${slug}/cards/${cardNumber}/triage`,
+      `/${slug}/cards/${card}/triage`,
       { column_id: columnId }
     );
   }
@@ -901,7 +925,8 @@ export class FizzyClient {
    */
   async sendCardToTriage(accountSlug: string, cardNumber: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("DELETE", `/${slug}/cards/${cardNumber}/triage`);
+    const card = assertPathSegment(cardNumber, "card_number");
+    await this.request<void>("DELETE", `/${slug}/cards/${card}/triage`);
   }
 
   /**
@@ -916,9 +941,11 @@ export class FizzyClient {
     tagTitle: string
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    // tagTitle is sent in the JSON body, not interpolated into the path.
     await this.request<void>(
       "POST",
-      `/${slug}/cards/${cardNumber}/taggings`,
+      `/${slug}/cards/${card}/taggings`,
       { tag_title: tagTitle }
     );
   }
@@ -934,9 +961,11 @@ export class FizzyClient {
     assigneeId: string
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    // assigneeId is sent in the JSON body, not interpolated into the path.
     await this.request<void>(
       "POST",
-      `/${slug}/cards/${cardNumber}/assignments`,
+      `/${slug}/cards/${card}/assignments`,
       { assignee_id: assigneeId }
     );
   }
@@ -948,7 +977,8 @@ export class FizzyClient {
    */
   async watchCard(accountSlug: string, cardNumber: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("POST", `/${slug}/cards/${cardNumber}/watch`);
+    const card = assertPathSegment(cardNumber, "card_number");
+    await this.request<void>("POST", `/${slug}/cards/${card}/watch`);
   }
 
   /**
@@ -958,7 +988,8 @@ export class FizzyClient {
    */
   async unwatchCard(accountSlug: string, cardNumber: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("DELETE", `/${slug}/cards/${cardNumber}/watch`);
+    const card = assertPathSegment(cardNumber, "card_number");
+    await this.request<void>("DELETE", `/${slug}/cards/${card}/watch`);
   }
 
   /**
@@ -967,7 +998,8 @@ export class FizzyClient {
    */
   async gildCard(accountSlug: string, cardNumber: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("POST", `/${slug}/cards/${cardNumber}/goldness`);
+    const card = assertPathSegment(cardNumber, "card_number");
+    await this.request<void>("POST", `/${slug}/cards/${card}/goldness`);
   }
 
   /**
@@ -976,7 +1008,8 @@ export class FizzyClient {
    */
   async ungildCard(accountSlug: string, cardNumber: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("DELETE", `/${slug}/cards/${cardNumber}/goldness`);
+    const card = assertPathSegment(cardNumber, "card_number");
+    await this.request<void>("DELETE", `/${slug}/cards/${card}/goldness`);
   }
 
   // ============ Pins ============
@@ -988,7 +1021,8 @@ export class FizzyClient {
    */
   async pinCard(accountSlug: string, cardNumber: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("POST", `/${slug}/cards/${cardNumber}/pin`);
+    const card = assertPathSegment(cardNumber, "card_number");
+    await this.request<void>("POST", `/${slug}/cards/${card}/pin`);
   }
 
   /**
@@ -998,7 +1032,8 @@ export class FizzyClient {
    */
   async unpinCard(accountSlug: string, cardNumber: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("DELETE", `/${slug}/cards/${cardNumber}/pin`);
+    const card = assertPathSegment(cardNumber, "card_number");
+    await this.request<void>("DELETE", `/${slug}/cards/${card}/pin`);
   }
 
   /**
@@ -1035,8 +1070,9 @@ export class FizzyClient {
     cardNumber: string
   ): Promise<FizzyComment[]> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
     return this.requestAllPages<FizzyComment>(
-      `/${slug}/cards/${cardNumber}/comments`
+      `/${slug}/cards/${card}/comments`
     );
   }
 
@@ -1051,9 +1087,10 @@ export class FizzyClient {
     data: CreateCommentRequest
   ): Promise<FizzyComment> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
     return this.request<FizzyComment>(
       "POST",
-      `/${slug}/cards/${cardNumber}/comments`,
+      `/${slug}/cards/${card}/comments`,
       { comment: data }
     );
   }
@@ -1069,9 +1106,11 @@ export class FizzyClient {
     commentId: string
   ): Promise<FizzyComment> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    const comment = assertPathSegment(commentId, "comment_id");
     return this.request<FizzyComment>(
       "GET",
-      `/${slug}/cards/${cardNumber}/comments/${commentId}`
+      `/${slug}/cards/${card}/comments/${comment}`
     );
   }
 
@@ -1087,9 +1126,11 @@ export class FizzyClient {
     data: UpdateCommentRequest
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    const comment = assertPathSegment(commentId, "comment_id");
     await this.request<void>(
       "PUT",
-      `/${slug}/cards/${cardNumber}/comments/${commentId}`,
+      `/${slug}/cards/${card}/comments/${comment}`,
       { comment: data }
     );
   }
@@ -1105,9 +1146,11 @@ export class FizzyClient {
     commentId: string
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    const comment = assertPathSegment(commentId, "comment_id");
     await this.request<void>(
       "DELETE",
-      `/${slug}/cards/${cardNumber}/comments/${commentId}`
+      `/${slug}/cards/${card}/comments/${comment}`
     );
   }
 
@@ -1124,9 +1167,11 @@ export class FizzyClient {
     commentId: string
   ): Promise<FizzyReaction[]> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    const comment = assertPathSegment(commentId, "comment_id");
     return this.request<FizzyReaction[]>(
       "GET",
-      `/${slug}/cards/${cardNumber}/comments/${commentId}/reactions`
+      `/${slug}/cards/${card}/comments/${comment}/reactions`
     );
   }
 
@@ -1142,9 +1187,11 @@ export class FizzyClient {
     content: string
   ): Promise<FizzyReaction> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    const comment = assertPathSegment(commentId, "comment_id");
     return this.request<FizzyReaction>(
       "POST",
-      `/${slug}/cards/${cardNumber}/comments/${commentId}/reactions`,
+      `/${slug}/cards/${card}/comments/${comment}/reactions`,
       { reaction: { content } }
     );
   }
@@ -1161,9 +1208,12 @@ export class FizzyClient {
     reactionId: string
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    const comment = assertPathSegment(commentId, "comment_id");
+    const reaction = assertPathSegment(reactionId, "reaction_id");
     await this.request<void>(
       "DELETE",
-      `/${slug}/cards/${cardNumber}/comments/${commentId}/reactions/${reactionId}`
+      `/${slug}/cards/${card}/comments/${comment}/reactions/${reaction}`
     );
   }
 
@@ -1180,9 +1230,11 @@ export class FizzyClient {
     stepId: string
   ): Promise<FizzyStep> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    const step = assertPathSegment(stepId, "step_id");
     return this.request<FizzyStep>(
       "GET",
-      `/${slug}/cards/${cardNumber}/steps/${stepId}`
+      `/${slug}/cards/${card}/steps/${step}`
     );
   }
 
@@ -1197,9 +1249,10 @@ export class FizzyClient {
     data: CreateStepRequest
   ): Promise<FizzyStep> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
     return this.request<FizzyStep>(
       "POST",
-      `/${slug}/cards/${cardNumber}/steps`,
+      `/${slug}/cards/${card}/steps`,
       { step: data }
     );
   }
@@ -1216,9 +1269,11 @@ export class FizzyClient {
     data: UpdateStepRequest
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    const step = assertPathSegment(stepId, "step_id");
     await this.request<void>(
       "PUT",
-      `/${slug}/cards/${cardNumber}/steps/${stepId}`,
+      `/${slug}/cards/${card}/steps/${step}`,
       { step: data }
     );
   }
@@ -1234,9 +1289,11 @@ export class FizzyClient {
     stepId: string
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const card = assertPathSegment(cardNumber, "card_number");
+    const step = assertPathSegment(stepId, "step_id");
     await this.request<void>(
       "DELETE",
-      `/${slug}/cards/${cardNumber}/steps/${stepId}`
+      `/${slug}/cards/${card}/steps/${step}`
     );
   }
 
@@ -1252,9 +1309,10 @@ export class FizzyClient {
     boardId: string
   ): Promise<FizzyColumn[]> {
     const slug = this.normalizeSlug(accountSlug);
+    const board = assertPathSegment(boardId, "board_id");
     return this.request<FizzyColumn[]>(
       "GET",
-      `/${slug}/boards/${boardId}/columns`
+      `/${slug}/boards/${board}/columns`
     );
   }
 
@@ -1269,9 +1327,11 @@ export class FizzyClient {
     columnId: string
   ): Promise<FizzyColumn> {
     const slug = this.normalizeSlug(accountSlug);
+    const board = assertPathSegment(boardId, "board_id");
+    const column = assertPathSegment(columnId, "column_id");
     return this.request<FizzyColumn>(
       "GET",
-      `/${slug}/boards/${boardId}/columns/${columnId}`
+      `/${slug}/boards/${board}/columns/${column}`
     );
   }
 
@@ -1286,9 +1346,10 @@ export class FizzyClient {
     data: CreateColumnRequest
   ): Promise<FizzyColumn> {
     const slug = this.normalizeSlug(accountSlug);
+    const board = assertPathSegment(boardId, "board_id");
     return this.request<FizzyColumn>(
       "POST",
-      `/${slug}/boards/${boardId}/columns`,
+      `/${slug}/boards/${board}/columns`,
       { column: data }
     );
   }
@@ -1305,9 +1366,11 @@ export class FizzyClient {
     data: UpdateColumnRequest
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const board = assertPathSegment(boardId, "board_id");
+    const column = assertPathSegment(columnId, "column_id");
     await this.request<void>(
       "PUT",
-      `/${slug}/boards/${boardId}/columns/${columnId}`,
+      `/${slug}/boards/${board}/columns/${column}`,
       { column: data }
     );
   }
@@ -1323,9 +1386,11 @@ export class FizzyClient {
     columnId: string
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const board = assertPathSegment(boardId, "board_id");
+    const column = assertPathSegment(columnId, "column_id");
     await this.request<void>(
       "DELETE",
-      `/${slug}/boards/${boardId}/columns/${columnId}`
+      `/${slug}/boards/${board}/columns/${column}`
     );
   }
 
@@ -1369,7 +1434,8 @@ export class FizzyClient {
    */
   async getUser(accountSlug: string, userId: string): Promise<FizzyUser> {
     const slug = this.normalizeSlug(accountSlug);
-    return this.request<FizzyUser>("GET", `/${slug}/users/${userId}`);
+    const user = assertPathSegment(userId, "user_id");
+    return this.request<FizzyUser>("GET", `/${slug}/users/${user}`);
   }
 
   /**
@@ -1383,7 +1449,8 @@ export class FizzyClient {
     data: UpdateUserRequest
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("PUT", `/${slug}/users/${userId}`, {
+    const user = assertPathSegment(userId, "user_id");
+    await this.request<void>("PUT", `/${slug}/users/${user}`, {
       user: data,
     });
   }
@@ -1395,7 +1462,8 @@ export class FizzyClient {
    */
   async deactivateUser(accountSlug: string, userId: string): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
-    await this.request<void>("DELETE", `/${slug}/users/${userId}`);
+    const user = assertPathSegment(userId, "user_id");
+    await this.request<void>("DELETE", `/${slug}/users/${user}`);
   }
 
   // ============ Notifications ============
@@ -1432,6 +1500,8 @@ export class FizzyClient {
 
     // Page 1 must stay page-less: `?page=1` is not the same request upstream,
     // it drops every unread notification from the response.
+    // requestedPage is a number (NotificationListOptions.page), checked above
+    // to be a safe positive integer, so it needs no path-segment guard.
     const path =
       requestedPage === 1
         ? `/${slug}/notifications`
@@ -1450,9 +1520,10 @@ export class FizzyClient {
     notificationId: string
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const notification = assertPathSegment(notificationId, "notification_id");
     await this.request<void>(
       "POST",
-      `/${slug}/notifications/${notificationId}/reading`
+      `/${slug}/notifications/${notification}/reading`
     );
   }
 
@@ -1466,9 +1537,10 @@ export class FizzyClient {
     notificationId: string
   ): Promise<void> {
     const slug = this.normalizeSlug(accountSlug);
+    const notification = assertPathSegment(notificationId, "notification_id");
     await this.request<void>(
       "DELETE",
-      `/${slug}/notifications/${notificationId}/reading`
+      `/${slug}/notifications/${notification}/reading`
     );
   }
 
@@ -1617,6 +1689,12 @@ export class FizzyClient {
    * characters that mean something in a URL.
    */
   private attachmentPath(slug: string, ref: AttachmentRef): string {
+    // slug here is already normalized: this is only ever called from
+    // fetchAttachment, right after it computes its own `slug` the same way
+    // every other method does. ref.signedId and ref.variation are pinned to a
+    // single path segment by validateSignedToken (utils/attachments.ts) —
+    // that charset admits `=` and `+`, which utils/path-segment.ts's does not,
+    // so they are exempt from that guard rather than re-validated by it.
     const filename = encodeURIComponent(ref.filename);
     return ref.variation
       ? `/${slug}/rails/active_storage/representations/redirect/${ref.signedId}/${ref.variation}/${filename}`
