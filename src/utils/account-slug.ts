@@ -11,11 +11,17 @@
  * client should refuse to build the request at all.
  *
  * The slug is not the only caller-supplied value interpolated into a path —
- * `cardId`, `boardId`, `commentId` and the rest are too, and are still
- * unguarded. That is a wider change than this module: those ids have no single
- * agreed shape, so pinning one risks rejecting real ids and breaking every tool
- * for that resource. This covers the value every account-scoped path starts
- * with, which is all of them but `/my/identity`.
+ * `cardId`, `boardId`, `commentId` and the rest are too. Those are guarded by
+ * `assertPathSegment` in `utils/path-segment.ts`, a sibling module rather than
+ * an extension of this one: an account slug is one thing with one shape across
+ * every account, so this module can afford to pin it, but the resource ids are
+ * not — most are a 25-character base36 id, but a card path resolves by number
+ * instead — so that module applies one conservative containment charset
+ * instead of a shape pin, which would risk rejecting a real id and breaking
+ * every tool for that resource. `cardId` in particular has no single shape to
+ * pin regardless — see that module's own doc comment. This module covers the
+ * value every account-scoped path starts with, which is all of them but
+ * `/my/identity`.
  *
  * This lives in its own module because both callers are load-bearing and
  * neither owns the rule: client/fizzy-client.ts applies it to every endpoint,

@@ -12,7 +12,8 @@ export const accountSlugSchema = z.string().describe(
 );
 
 export const boardIdSchema = z.string().describe(
-  "The unique board identifier (numeric string, e.g., '12345'). " +
+  "The unique board identifier: a 25-character identifier, " +
+  "e.g., '0000000000000000000000abc'. " +
   "Get available board IDs from fizzy_get_boards."
 );
 
@@ -28,37 +29,44 @@ export const cardNumberSchema = z.string().describe(
 );
 
 export const columnIdSchema = z.string().describe(
-  "The unique column identifier (numeric string). Columns represent workflow stages. " +
+  "The unique column identifier: a 25-character identifier, " +
+  "e.g., '0000000000000000000000abc'. Columns represent workflow stages. " +
   "Get available column IDs from fizzy_get_columns."
 );
 
 export const tagIdSchema = z.string().describe(
-  "The unique tag identifier (numeric string). Tags are labels for categorizing cards. " +
+  "The unique tag identifier: a 25-character identifier, " +
+  "e.g., '0000000000000000000000abc'. Tags are labels for categorizing cards. " +
   "Get available tag IDs from fizzy_get_tags."
 );
 
 export const userIdSchema = z.string().describe(
-  "The unique user identifier (numeric string). " +
+  "The unique user identifier: a 25-character identifier, " +
+  "e.g., '0000000000000000000000abc'. " +
   "Get available user IDs from fizzy_get_users."
 );
 
 export const notificationIdSchema = z.string().describe(
-  "The unique notification identifier (numeric string). " +
+  "The unique notification identifier: a 25-character identifier, " +
+  "e.g., '0000000000000000000000abc'. " +
   "Get notification IDs from fizzy_get_notifications."
 );
 
 export const commentIdSchema = z.string().describe(
-  "The unique comment identifier (numeric string). " +
+  "The unique comment identifier: a 25-character identifier, " +
+  "e.g., '0000000000000000000000abc'. " +
   "Get comment IDs from fizzy_get_card_comments."
 );
 
 export const reactionIdSchema = z.string().describe(
-  "The unique reaction identifier (numeric string). " +
+  "The unique reaction identifier: a 25-character identifier, " +
+  "e.g., '0000000000000000000000abc'. " +
   "Get reaction IDs from fizzy_get_reactions."
 );
 
 export const stepIdSchema = z.string().describe(
-  "The unique step/to-do identifier (numeric string). Steps are checklist items on cards. " +
+  "The unique step/to-do identifier: a 25-character identifier, " +
+  "e.g., '0000000000000000000000abc'. Steps are checklist items on cards. " +
   "Step IDs are returned when creating steps or fetching card details."
 );
 
