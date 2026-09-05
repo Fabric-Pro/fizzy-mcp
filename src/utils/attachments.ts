@@ -17,6 +17,7 @@
  */
 
 import type { AttachmentRef } from "../client/types.js";
+import { normalizeAccountSlug } from "./account-slug.js";
 import { base64ToBytes, maxEncodedLength } from "./base64.js";
 import { getLocalFileReader } from "./file-source.js";
 
@@ -311,27 +312,6 @@ function validateAttachmentFilename(value: string): string {
 }
 
 /**
- * Validate the account slug this attachment is scoped to.
- *
- * Narrower than the slug handling elsewhere in the client, which only strips a
- * leading `/`. This path builds a URL that is fetched with the bearer token
- * attached and whose response is streamed back to the model, so the slug is
- * pinned to a single path segment here rather than trusted.
- */
-function validateAccountSlug(value: string): string {
-  const slug = value.startsWith("/") ? value.slice(1) : value;
-  if (slug === "" || slug === "." || slug === "..") {
-    throw new Error("account_slug is required and must be an account slug");
-  }
-  if (!/^[A-Za-z0-9._-]+$/.test(slug)) {
-    throw new Error(
-      "account_slug must be an account slug such as '1234567', not a path or URL"
-    );
-  }
-  return slug;
-}
-
-/**
  * Resolve the arguments of `fizzy_get_attachment` into a validated request.
  *
  * **The tool never accepts a URL.** A caller-supplied URL fetched with the
@@ -358,7 +338,10 @@ export function parseAttachmentRequest(
     );
   }
 
-  const accountSlug = validateAccountSlug(requiredString(args, "account_slug"));
+  // Pinned to a single path segment: this slug ends up in a URL that is fetched
+  // with the caller's bearer token attached and whose body is streamed back to
+  // the model. See utils/account-slug.ts.
+  const accountSlug = normalizeAccountSlug(requiredString(args, "account_slug"));
   const signedId = validateSignedToken(requiredString(args, "signed_id"), "signed_id");
   const filename = validateAttachmentFilename(requiredString(args, "filename"));
 

@@ -207,6 +207,26 @@ describe("FizzyClient", () => {
         expect.any(Object)
       );
     });
+
+    // The slug is interpolated into every request path, so a caller-supplied
+    // one that escapes its segment retargets the request. The client must
+    // refuse to build it rather than letting the API decide. Sampled across a
+    // read, a write and a card action — the three path shapes — since every
+    // method routes through the same normalizeSlug; the rule itself has its own
+    // suite in tests/utils/account-slug.test.ts.
+    it.each([
+      ["a traversal", "123456/../999999"],
+      ["extra path segments", "123456/cards"],
+      ["a query string", "123456?x=1"],
+      ["an absolute URL", "https://evil.example/123456"],
+      ["a parent directory", ".."],
+      ["an empty slug", ""],
+    ])("should reject %s without issuing a request", async (_label, slug) => {
+      await expect(client.getBoards(slug)).rejects.toThrow(/account_slug/);
+      await expect(client.createBoard(slug, { name: "x" })).rejects.toThrow(/account_slug/);
+      await expect(client.closeCard(slug, "1")).rejects.toThrow(/account_slug/);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
   });
 
   describe("authentication", () => {

@@ -47,6 +47,7 @@ import {
   isRetryableError,
 } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { normalizeAccountSlug } from "../utils/account-slug.js";
 import { ETagCache } from "../utils/etag-cache.js";
 import { md5Base64 } from "../utils/md5.js";
 
@@ -186,13 +187,14 @@ export class FizzyClient {
 
   /**
    * Normalize account slug by removing leading slash if present.
-   * The Fizzy API returns slugs like "/123456" but API paths need "123456"
+   * The Fizzy API returns slugs like "/123456" but API paths need "123456".
+   *
+   * Also rejects a slug that is not a bare path segment. Every method below
+   * interpolates the result into a request path, so a slug carrying `/`, `..`
+   * or `?` would silently retarget the request; see utils/account-slug.ts.
    */
   private normalizeSlug(slug: string): string {
-    if (!slug) {
-      throw new Error("Account slug is required");
-    }
-    return slug.startsWith("/") ? slug.slice(1) : slug;
+    return normalizeAccountSlug(slug);
   }
 
   /**
