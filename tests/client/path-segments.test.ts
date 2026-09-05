@@ -120,16 +120,28 @@
  *    a pattern for" the working definition of a network sink. It is not one:
  *    `globalThis.fetch(...)` reaches the network identically, and so does a
  *    `fetch` stored in a variable and called through that name later, where
- *    no pattern keyed on the call site can see it at all. Either one could
- *    have carried the concatenated path above past all three checks with the
- *    pinned count still reading 3. So the rule is inverted: every textual
- *    occurrence of the identifier `fetch` is found, and anything that is not
- *    one of the three reviewed bare calls is a violation on sight. The
- *    allowlist is an inventory of approved *occurrences*, not of syntax.
- *    `fetchAttachment` and other longer identifiers are unaffected, since
- *    `\bfetch\b` does not match inside a word; string and template *text* is
- *    blanked first (`blankStringLiterals`), because this client mentions
- *    "fetch" in four ordinary strings and none of them is a network call.
+ *    no pattern keyed on the call site can see it at all. Either could have
+ *    carried the concatenated path above past all three checks with the
+ *    pinned count still reading 3.
+ *
+ *    The first attempt at a fix kept the call-shape idea and added a literal
+ *    parser, so string text could be blanked before scanning. That was the
+ *    wrong move twice over: `globalThis["fetch"](url)` hid the identifier
+ *    inside a string the parser then erased, and a `}` inside a string inside
+ *    a `${...}` expression closed the interpolation early and blanked real
+ *    code — a blind spot, which is the direction that actually hurts. The
+ *    lesson is that a text scanner cannot out-parse source written to evade
+ *    it, so it should not try.
+ *
+ *    So the rule is inverted and the parser is gone. Every textual occurrence
+ *    of `fetch` is found — prose included — and each one must be accounted
+ *    for by name: the three reviewed calls in `RAW_FETCH_ALLOWLIST`, the four
+ *    prose mentions in `FETCH_MENTIONS`. The allowlist is an inventory of
+ *    approved *occurrences*, not of syntax. That is simpler and stricter at
+ *    once: `globalThis["fetch"]` now fails on the unlisted string it hides
+ *    in, and there is no parser left to have a blind spot. `fetchAttachment`
+ *    and other longer identifiers are unaffected, since `\bfetch\b` does not
+ *    match inside a word.
  *
  * **Design is default-deny, and picks a direction to be wrong in.** Borrowed
  * directly from declared-dependencies.test.ts: a guard that quietly misses a
@@ -225,6 +237,18 @@
  * reviewed, so a rewritten (but still textually matching) implementation of
  * an allowlisted method could in principle drift unsafe without tripping this
  * check at all.
+ *
+ * **And none of it survives a contributor who is actively evading it.** These
+ * checks read the same source the contributor writes, so anything that hides
+ * the identifier from a regex — a Unicode escape (`\u0066etch`), a name
+ * assembled at runtime, an import aliased to something else — defeats them,
+ * and so does deleting this file. That is not a gap to be closed by a
+ * cleverer pattern; it is what a static text check over attacker-controlled
+ * source fundamentally is. The threat this file actually defends against is
+ * the realistic one: a contributor adding an endpoint who does not know the
+ * guard exists, or a refactor that quietly drops it. Against that it is
+ * strong, and it should not be described — in a review, a PR, or a later
+ * commit message — as more than that.
  */
 
 import { describe, it, expect } from "vitest";
@@ -1015,118 +1039,36 @@ function findCallViolations(source: string): Violation[] {
 // past both in silence.
 
 /**
- * Blank the *text* of every string and template literal in `masked`, keeping
- * the quotes, the length and the newlines, so an index into the result still
- * lines up with the same character in the input.
+ * Every occurrence of the identifier `fetch` in `masked`, each classified as
+ * a bare `fetch(` call or not.
  *
- * Only the raw-fetch check below wants this. The other two checks read what
- * is inside a template literal — that text is the request path — so they run
- * on the comment-masked source with strings intact. The fetch check wants the
- * opposite: `fetch` appears four times in this client inside ordinary strings
- * (`error.message.includes("fetch")` three times and one timeout message),
- * and none of those is a network sink.
+ * There is no attempt to tell code from string text here, and that is
+ * deliberate. An earlier version blanked string and template literals first
+ * so the scan would not trip over the four places this client legitimately
+ * says "fetch" in prose — but a hand-written literal parser is exactly the
+ * wrong tool: `globalThis["fetch"](url)` hid the identifier inside a string
+ * the parser then erased, and a `}` inside a string inside a `${...}`
+ * expression ended the interpolation early and blanked real code. Each fix
+ * revealed another spelling, because a text scanner cannot out-parse source
+ * that is trying to evade it.
  *
- * A `${...}` interpolation is copied through rather than blanked: the literal
- * text around an expression is prose, but the expression itself is code and a
- * call hiding there must stay visible. A nested template inside such an
- * expression keeps its text visible too, which over-reports rather than
- * under-reports — the direction this file always errs in.
- */
-function blankStringLiterals(masked: string): string {
-  const out = masked.split("");
-  const blank = (i: number) => {
-    out[i] = masked[i] === "\n" ? "\n" : " ";
-  };
-  let i = 0;
-  while (i < masked.length) {
-    const ch = masked[i];
-
-    if (ch === '"' || ch === "'") {
-      i++;
-      while (i < masked.length && masked[i] !== ch) {
-        if (masked[i] === "\\") {
-          blank(i);
-          if (i + 1 < masked.length) blank(i + 1);
-          i += 2;
-          continue;
-        }
-        blank(i);
-        i++;
-      }
-      i++;
-      continue;
-    }
-
-    if (ch === "`") {
-      i++;
-      while (i < masked.length && masked[i] !== "`") {
-        if (masked[i] === "\\") {
-          blank(i);
-          if (i + 1 < masked.length) blank(i + 1);
-          i += 2;
-          continue;
-        }
-        // `${` opens an expression: copy it through verbatim to the matching
-        // brace, so code inside an interpolation stays visible to the scan.
-        if (masked[i] === "$" && masked[i + 1] === "{") {
-          let depth = 0;
-          while (i < masked.length) {
-            if (masked[i] === "{") depth++;
-            else if (masked[i] === "}") {
-              depth--;
-              if (depth === 0) {
-                i++;
-                break;
-              }
-            }
-            i++;
-          }
-          continue;
-        }
-        blank(i);
-        i++;
-      }
-      i++;
-      continue;
-    }
-
-    i++;
-  }
-  return out.join("");
-}
-
-/**
- * Every occurrence of the identifier `fetch` in `masked` that is not inside a
- * string literal, each classified as a bare `fetch(` call or not.
- *
- * The earlier version of this scan looked for a bare `fetch(` and nothing
- * else, which quietly made "the shapes I thought to match" the definition of
- * a network sink: `globalThis.fetch(...)`, `(0, fetch)(...)` and an aliased
- * `const f = fetch` all reach the network and none of them matched, so a
- * method using one could build a path by concatenating an unguarded id and
- * pass all three checks. The pinned site count did not help either — an
- * unmatched form leaves it unchanged.
- *
- * So the rule is inverted. Every textual `fetch` is found, and anything that
- * is not one of the three reviewed bare calls is a violation on sight. That
- * makes the allowlist an inventory of approved *occurrences* rather than of
- * the syntax someone remembered to write a pattern for, and a new spelling
- * fails loudly instead of passing silently. `fetchAttachment` and friends are
- * untouched: `\bfetch\b` does not match inside a longer identifier.
+ * So the parser is gone. Every textual `fetch` is an occurrence, prose
+ * included, and every occurrence has to be accounted for by name — the three
+ * reviewed calls in `RAW_FETCH_ALLOWLIST`, the four prose mentions in
+ * `FETCH_MENTIONS`. That is simpler *and* stricter: `globalThis["fetch"]`
+ * now fails on the string `"fetch"` nobody listed, and there is no parser
+ * left to have a blind spot. `fetchAttachment` and other longer identifiers
+ * are unaffected, since `\bfetch\b` does not match inside a word.
  */
 function findRawFetchCallSites(masked: string, methodStarts: MethodStart[]): FetchCallSite[] {
-  // Indices into codeOnly and masked agree: blankStringLiterals preserves
-  // length, so an argument span found here can be read back off masked, which
-  // still has the real text.
-  const codeOnly = blankStringLiterals(masked);
   const sites: FetchCallSite[] = [];
   const pattern = /\bfetch\b/g;
   let m: RegExpExecArray | null;
-  while ((m = pattern.exec(codeOnly))) {
-    const line = codeOnly.slice(0, m.index).split("\n").length;
+  while ((m = pattern.exec(masked))) {
+    const line = masked.slice(0, m.index).split("\n").length;
     const method = findEnclosingMethod(methodStarts, m.index) ?? { name: "(none)", index: -1 };
-    const precededByDot = /[.?]\s*$/.test(codeOnly.slice(0, m.index));
-    const callAhead = /^\s*\(/.exec(codeOnly.slice(m.index + "fetch".length));
+    const precededByDot = /[.?]\s*$/.test(masked.slice(0, m.index));
+    const callAhead = /^\s*\(/.exec(masked.slice(m.index + "fetch".length));
 
     if (precededByDot || !callAhead) {
       sites.push({ index: m.index, line, method, urlArg: undefined, isBareCall: false });
@@ -1144,6 +1086,36 @@ function findRawFetchCallSites(masked: string, methodStarts: MethodStart[]): Fet
   }
   return sites;
 }
+
+/**
+ * The occurrences of `fetch` in this client that are not calls at all: three
+ * `error.message.includes("fetch")` guards and one timeout message. Keyed by
+ * method with a count, so a new mention in an already-listed method still
+ * moves a number and fails.
+ *
+ * Listing prose alongside calls is the price of having no literal parser, and
+ * it is a low one: four entries, each obviously not a network call, against a
+ * scan with nowhere left to be blind.
+ */
+const FETCH_MENTIONS: ReadonlyArray<{ method: string; count: number; reason: string }> = [
+  {
+    method: "executeRequestWithMeta",
+    count: 1,
+    reason: 'error.message.includes("fetch") — classifying a TypeError as a network failure.',
+  },
+  {
+    method: "putBlobToStorage",
+    count: 1,
+    reason: 'error.message.includes("fetch") — the same classification on the upload path.',
+  },
+  {
+    method: "fetchAttachment",
+    count: 2,
+    reason:
+      'the same includes("fetch") classification, plus the "Attachment fetch timed out" ' +
+      "message in the template literal above it.",
+  },
+];
 
 /**
  * Every raw `fetch(` call this file is allowed to make, keyed by the
@@ -1190,19 +1162,32 @@ function findRawFetchViolations(source: string): Violation[] {
   const methodStarts = findMethodStarts(masked, classBodyStartOf(masked));
   const sites = findRawFetchCallSites(masked, methodStarts);
 
+  // Spent down as each listed prose mention is matched, so an extra mention
+  // in an already-listed method is a violation rather than a free pass.
+  const mentionBudget = new Map(FETCH_MENTIONS.map((e) => [e.method, e.count]));
+
   const violations: Violation[] = [];
   for (const site of sites) {
     if (!site.isBareCall) {
+      // Not a call: either prose accounted for in FETCH_MENTIONS, or a
+      // spelling nobody reviewed — globalThis.fetch, globalThis["fetch"], a
+      // fetch stored in a variable. The budget is spent per method below, so
+      // a mention beyond the listed count lands here too.
+      const budget = mentionBudget.get(site.method.name);
+      if (budget !== undefined && budget > 0) {
+        mentionBudget.set(site.method.name, budget - 1);
+        continue;
+      }
       violations.push({
         line: site.line,
         method: site.method.name,
         expr: "(n/a)",
         template: "fetch",
         reason:
-          "an occurrence of `fetch` that is not one of the three reviewed bare calls — " +
-          "globalThis.fetch, a fetch stored in a variable, or any other spelling is not an " +
-          "approved network sink, and reaching the network through one would bypass every " +
-          "check in this file",
+          "an occurrence of `fetch` that is neither one of the three reviewed bare calls " +
+          "nor a listed prose mention — globalThis.fetch, globalThis[\"fetch\"], a fetch " +
+          "stored in a variable and any other spelling reach the network without being " +
+          "seen by any other check in this file",
       });
       continue;
     }
@@ -1641,7 +1626,7 @@ describe("raw fetch scanner", () => {
     expect(findCallViolations(source)).toEqual([]);
     const violations = findRawFetchViolations(source);
     expect(violations).toHaveLength(1);
-    expect(violations[0].reason).toMatch(/not one of the three reviewed bare calls/);
+    expect(violations[0].reason).toMatch(/neither one of the three reviewed bare calls nor a listed prose mention/);
   });
 
   it("rejects a fetch stored in a variable rather than called outright", () => {
@@ -1655,30 +1640,48 @@ describe("raw fetch scanner", () => {
   }`);
     const violations = findRawFetchViolations(source);
     expect(violations).toHaveLength(1);
-    expect(violations[0].reason).toMatch(/not one of the three reviewed bare calls/);
+    expect(violations[0].reason).toMatch(/neither one of the three reviewed bare calls nor a listed prose mention/);
   });
 
-  it("ignores the word fetch inside a string or a template's literal text", () => {
+  it("counts prose as an occurrence, so an unlisted mention is a violation", () => {
     // The real client says `error.message.includes("fetch")` three times and
-    // has a timeout message reading "Attachment fetch timed out". None is a
-    // network sink, and blanking string text is what keeps the inverted rule
-    // from flagging prose.
+    // has an "Attachment fetch timed out" message; those are accounted for by
+    // name in FETCH_MENTIONS. In a method nobody listed, the same prose is a
+    // violation — which is exactly what makes globalThis["fetch"] fail, since
+    // it hides the identifier in a string too.
     const source = wrap(`
-  private async request(url: string) {
+  private async sendWidget(url: string) {
     try {
       return await fetch(url);
     } catch (error) {
       if (error instanceof TypeError && error.message.includes("fetch")) {
-        throw new Error(\`fetch failed after \${this.timeout}ms\`);
+        throw new Error("request failed");
       }
       throw error;
     }
   }`);
-    // The one real call is a bare call in an unlisted method, so exactly one
-    // violation — not four.
+    const violations = findRawFetchViolations(source);
+    // Two: the unlisted bare call, and the unlisted prose mention.
+    expect(violations).toHaveLength(2);
+    expect(violations.map((v) => v.method)).toEqual(["sendWidget", "sendWidget"]);
+  });
+
+  it("rejects a computed-property fetch, which hides the identifier in a string", () => {
+    // globalThis["fetch"](url) reaches the network with no bare `fetch(`
+    // anywhere. An earlier version of this check blanked string text before
+    // scanning and so erased the only evidence; counting prose is what closes
+    // it, with no parser to get wrong.
+    const source = wrap(`
+  private async fetchWidget(accountSlug: string, boardId: string) {
+    const slug = this.normalizeSlug(accountSlug);
+    const path = \`/\${slug}/boards/\` + boardId;
+    return globalThis["fetch"](this.baseUrl + path);
+  }`);
+    expect(findTemplateViolations(source)).toEqual([]);
+    expect(findCallViolations(source)).toEqual([]);
     const violations = findRawFetchViolations(source);
     expect(violations).toHaveLength(1);
-    expect(violations[0].reason).toMatch(/not on the allowlist/);
+    expect(violations[0].reason).toMatch(/neither one of the three reviewed bare calls nor a listed prose mention/);
   });
 
   it("still sees a fetch inside a template interpolation", () => {
@@ -1690,7 +1693,7 @@ describe("raw fetch scanner", () => {
   }`);
     const violations = findRawFetchViolations(source);
     expect(violations).toHaveLength(1);
-    expect(violations[0].reason).toMatch(/not one of the three reviewed bare calls/);
+    expect(violations[0].reason).toMatch(/neither one of the three reviewed bare calls nor a listed prose mention/);
   });
 
   it("accepts the three real call sites' own (method, url) shape", () => {
@@ -1760,16 +1763,20 @@ describe("path segment guards on FizzyClient", () => {
     expect(violations).toEqual([]);
   });
 
-  it("finds the raw fetch calls the real file actually has", () => {
+  it("finds every fetch occurrence the real file actually has", () => {
     // Guards the raw-fetch sweep the same way the two counts above guard
-    // their own scans: a pattern that stopped matching `fetch(` would make
-    // the allowlist assertion below pass vacuously over zero call sites. 3 is
-    // executeRequestWithMeta, putBlobToStorage and fetchAttachment — see
-    // check 3 in the module doc comment.
+    // their own scans: a pattern that stopped matching would make the
+    // allowlist assertion below pass vacuously over zero occurrences. 7 is
+    // every `fetch` outside a comment — the three calls in
+    // executeRequestWithMeta, putBlobToStorage and fetchAttachment, plus the
+    // four prose mentions listed in FETCH_MENTIONS. Prose is counted because
+    // there is no literal parser to exclude it; see check 3 in the module doc
+    // comment for why that is the point rather than a shortcoming.
     const masked = blankComments(source);
     const methodStarts = findMethodStarts(masked, classBodyStartOf(masked));
     const sites = findRawFetchCallSites(masked, methodStarts);
-    expect(sites.length).toBe(3);
+    expect(sites.length).toBe(7);
+    expect(sites.filter((site) => site.isBareCall)).toHaveLength(3);
   });
 
   it("proves every raw fetch call is on the allowlist", () => {
