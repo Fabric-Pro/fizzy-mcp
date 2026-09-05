@@ -28,7 +28,6 @@ The Cloudflare Workers deployment provides:
 - **🔒 Built-in Security**: CORS, per-user authentication, rate limiting, TLS
 - **👥 Multi-User Support**: Each user provides their own Fizzy token
 - **📊 Analytics & Logging**: Optional Analytics Engine metrics and R2 audit logs
-- **⚡ Caching**: Optional KV caching to reduce Fizzy API calls
 
 ## Transport Support
 
@@ -138,7 +137,6 @@ Configure in `wrangler.jsonc`:
 | `LOG_LEVEL` | No | `info` | Logging level (debug, info, warn, error) |
 | `RATE_LIMIT_RPM` | No | `100` | Requests per minute per user |
 | `ENABLE_RATE_LIMIT` | No | `true` | Enable/disable rate limiting |
-| `ENABLE_CACHE` | No | `true` | Enable/disable KV caching |
 
 Origins are matched exactly. The one convenience is loopback: an entry written
 without a port (`http://localhost`) matches any port on that same scheme and
@@ -252,41 +250,6 @@ Protect against abuse with per-user rate limiting.
 - Standard `X-RateLimit-*` headers in responses
 - `429 Too Many Requests` with `Retry-After` header when exceeded
 
-### 4. KV Caching (Response Cache)
-
-Cache Fizzy API responses to reduce latency and API calls.
-
-**Setup:**
-```bash
-# Create the KV namespace
-wrangler kv namespace create FIZZY_CACHE
-wrangler kv namespace create FIZZY_CACHE --preview  # For local dev
-```
-
-Add the namespace IDs to `wrangler.jsonc`:
-```jsonc
-"kv_namespaces": [
-  {
-    "binding": "FIZZY_CACHE",
-    "id": "<your-kv-namespace-id>",
-    "preview_id": "<your-preview-kv-namespace-id>"
-  }
-]
-```
-
-**Cache TTLs:**
-| Resource | TTL |
-|----------|-----|
-| Identity/Accounts | 30 minutes |
-| Boards | 5 minutes |
-| Cards | 1 minute |
-| Columns | 5 minutes |
-| Tags/Users | 10 minutes |
-| Notifications | 30 seconds |
-| Comments | 1 minute |
-
-**Note:** Cache is automatically invalidated on mutations.
-
 ### Feature Summary
 
 Check which features are enabled via the health endpoint:
@@ -305,8 +268,7 @@ Response:
   "features": {
     "rateLimiting": true,
     "auditLogs": false,
-    "analytics": false,
-    "caching": false
+    "analytics": false
   }
 }
 ```
@@ -583,8 +545,7 @@ Response:
   "features": {
     "rateLimiting": true,
     "auditLogs": true,
-    "analytics": true,
-    "caching": false
+    "analytics": true
   }
 }
 ```
