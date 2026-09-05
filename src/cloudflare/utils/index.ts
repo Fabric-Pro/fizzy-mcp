@@ -5,7 +5,6 @@
  * - Structured logging with R2 persistence
  * - Analytics Engine integration
  * - Rate limiting with Durable Objects
- * - KV caching for API responses
  */
 
 // Logger
@@ -37,15 +36,6 @@ export {
   type RateLimitConfig,
   type RateLimitResult,
 } from "./rate-limiter.js";
-
-// KV Cache
-export {
-  KVCache,
-  createCacheWrapper,
-  CACHE_TTL,
-  type KVCacheConfig,
-  type CacheMetadata,
-} from "./kv-cache.js";
 
 
 

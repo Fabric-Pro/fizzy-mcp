@@ -10,7 +10,6 @@
     "FIZZY_BASE_URL": "https://app.fizzy.do",
     "LOG_LEVEL": "info",
     "RATE_LIMIT_RPM": "10000",
-    "ENABLE_CACHE": "true",
     "ENABLE_RATE_LIMIT": "true"
   },
 
@@ -39,18 +38,6 @@
       "new_classes": ["RateLimiterDO"]
     }
   ],
-
-  // KV namespaces for caching
-  // NOTE: Create these in Cloudflare dashboard or via CLI:
-  //   wrangler kv namespace create FIZZY_CACHE
-  //   wrangler kv namespace create FIZZY_CACHE --preview
-  // "kv_namespaces": [
-  //   {
-  //     "binding": "FIZZY_CACHE",
-  //     "id": "<your-kv-namespace-id>",
-  //     "preview_id": "<your-preview-kv-namespace-id>"
-  //   }
-  // ],
 
   // R2 buckets for audit logs
   // NOTE: Create in Cloudflare dashboard or via CLI:
@@ -93,7 +80,6 @@
         "FIZZY_BASE_URL": "https://app.fizzy.do",
         "LOG_LEVEL": "warn",
         "RATE_LIMIT_RPM": "10000",
-        "ENABLE_CACHE": "true",
         "ENABLE_RATE_LIMIT": "true"
       },
       "durable_objects": {
@@ -108,12 +94,6 @@
           }
         ]
       },
-      "kv_namespaces": [
-        {
-          "binding": "FIZZY_CACHE",
-          "id": "1947a840db4942b78963cdeefa8f2edd"
-        }
-      ],
       "r2_buckets": [
         {
           "binding": "AUDIT_LOGS",
@@ -137,7 +117,6 @@
         "FIZZY_BASE_URL": "https://app.fizzy.do",
         "LOG_LEVEL": "debug",
         "RATE_LIMIT_RPM": "10000",
-        "ENABLE_CACHE": "true",
         "ENABLE_RATE_LIMIT": "true"
       },
       "durable_objects": {
@@ -152,12 +131,6 @@
           }
         ]
       },
-      "kv_namespaces": [
-        {
-          "binding": "FIZZY_CACHE",
-          "id": "f7b2b9ab977e478dbbff05a1b1c442f4"
-        }
-      ],
       "r2_buckets": [
         {
           "binding": "AUDIT_LOGS",

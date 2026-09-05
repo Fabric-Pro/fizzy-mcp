@@ -10,7 +10,6 @@ import type {
   DurableObjectState, 
   ExecutionContext,
   R2Bucket,
-  KVNamespace,
   AnalyticsEngineDataset,
 } from "@cloudflare/workers-types";
 
@@ -67,12 +66,6 @@ export interface Env {
   RATE_LIMIT_RPM?: string;
 
   /**
-   * Enable/disable caching
-   * Default: "true"
-   */
-  ENABLE_CACHE?: string;
-
-  /**
    * Enable/disable rate limiting
    * Default: "true"
    */
@@ -96,13 +89,6 @@ export interface Env {
    * If not provided, logs are only written to console
    */
   AUDIT_LOGS?: R2Bucket;
-
-  // === KV Bindings (optional) ===
-  /**
-   * KV namespace for caching Fizzy API responses
-   * If not provided, caching is disabled
-   */
-  FIZZY_CACHE?: KVNamespace;
 
   // === Analytics Engine Bindings (optional) ===
   /**

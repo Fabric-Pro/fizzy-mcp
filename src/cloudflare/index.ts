@@ -86,7 +86,6 @@ function handleHealth(corsOrigin: string, env: Env): Response {
       rateLimiting: !!env.RATE_LIMITER && env.ENABLE_RATE_LIMIT !== "false",
       auditLogs: !!env.AUDIT_LOGS,
       analytics: !!env.ANALYTICS,
-      caching: !!env.FIZZY_CACHE && env.ENABLE_CACHE !== "false",
     },
   };
 
