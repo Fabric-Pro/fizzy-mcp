@@ -62,7 +62,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260904.1",
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.4.1",
     "@vitest/coverage-v8": "^5.0.0",
     "dotenv": "^17.2.3",
     "tsx": "^4.19.0",
