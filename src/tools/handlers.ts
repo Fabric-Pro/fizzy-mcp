@@ -194,6 +194,27 @@ function parsePage(value: unknown): number | undefined {
 }
 
 /**
+ * Reject the removed `status` field on fizzy_create_card and
+ * fizzy_update_card.
+ *
+ * Mirrors the `unsupported` guard in fizzy_get_cards above: the Cloudflare
+ * transport executes raw args without zod validation, so a stale client (or
+ * a model going by outdated context) sending `status` needs a visible error
+ * here rather than the field being silently dropped from the create/update
+ * payload. The stdio/Node MCP SDK path strips unknown keys before the
+ * handler runs, so this only fires there if a pre-validation bug ever
+ * reintroduces the field.
+ */
+function rejectStatusField(args: Record<string, unknown>): void {
+  if (args.status !== undefined) {
+    throw new Error(
+      "Unsupported field: status. Cards are always created published; there is no API " +
+      "route to create a draft. Use fizzy_close_card/fizzy_reopen_card for the card lifecycle."
+    );
+  }
+}
+
+/**
  * Validate the optional `assignee_ids` argument of the card create/update tools.
  *
  * Like the guards above, this has to run here because the Cloudflare transport
@@ -315,6 +336,170 @@ function describeAssignmentGaps(
 function createdCardNumber(card: { number?: number; url?: string }): string | undefined {
   if (card.number !== undefined && card.number !== null) return String(card.number);
   return card.url?.match(/\/cards\/(\d+)/)?.[1];
+}
+
+/**
+ * Validate the optional `tag_ids` argument of the card create/update tools.
+ *
+ * Mirrors `parseAssigneeIds` for the same reason: the Cloudflare transport
+ * executes raw args without zod, so a non-array value or a non-string entry
+ * has to be rejected here rather than reaching `resolveTagTitles` and either
+ * iterating a string character by character or looking up `undefined` as a
+ * tag id.
+ *
+ * Duplicates are dropped up front for the same reason `parseAssigneeIds`
+ * drops them: `toggleCardTag` toggles, so the same id twice would add a tag
+ * and immediately remove it again.
+ */
+function parseTagIds(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new Error("tag_ids must be an array of tag ID strings");
+  }
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new Error("tag_ids must contain non-empty tag ID strings");
+    }
+  }
+  return [...new Set(value as string[])];
+}
+
+/**
+ * Validate the optional `column_id` argument of the card create/update tools.
+ *
+ * Here for the same Cloudflare-without-zod reason as the other parsers above.
+ */
+function parseColumnId(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error("column_id must be a non-empty string");
+  }
+  return value;
+}
+
+/**
+ * Resolve `tag_ids` to the titles `toggleCardTag` actually takes, before
+ * anything else changes.
+ *
+ * Upstream's `toggle_tag_with(title)` does
+ * `account.tags.find_or_create_by!(title:)` — passing an id string that
+ * happens not to match any tag's title would silently mint a new tag named
+ * after that id, rather than erroring. So every id is resolved against
+ * `fizzy_get_tags` up front, and an id with no match fails loudly here,
+ * before the card is created or changed at all, rather than quietly creating
+ * garbage tags afterward.
+ */
+async function resolveTagTitles(
+  client: FizzyClient,
+  accountSlug: string,
+  tagIds: string[]
+): Promise<string[]> {
+  const tags = await client.getTags(accountSlug);
+  const byId = new Map(tags.map((tag) => [tag.id, tag.title]));
+  const unknown: string[] = [];
+  const titles = new Set<string>();
+  for (const id of tagIds) {
+    const title = byId.get(id);
+    if (title === undefined) {
+      unknown.push(id);
+    } else {
+      titles.add(title);
+    }
+  }
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown tag id(s): ${unknown.join(", ")}. Call fizzy_get_tags to see the valid ` +
+      "tag ids and titles for this account."
+    );
+  }
+  return [...titles];
+}
+
+/**
+ * The tag titles a card payload reports. `_card.json.jbuilder` renders
+ * `json.tags card.tags.pluck(:title).sort` — plain strings, not the
+ * `FizzyTag[]` the type declares (see the note in utils/projections.ts) — so
+ * this accepts a bare string as well as an object carrying `title`, the same
+ * defensive handling `summarizeCard` uses.
+ */
+function tagTitlesOf(card: { tags?: unknown }): string[] {
+  const tags = (card as Record<string, unknown>).tags;
+  if (!Array.isArray(tags)) return [];
+  const titles: string[] = [];
+  for (const tag of tags) {
+    if (typeof tag === "string") {
+      titles.push(tag);
+    } else if (
+      tag !== null &&
+      typeof tag === "object" &&
+      typeof (tag as Record<string, unknown>).title === "string"
+    ) {
+      titles.push((tag as Record<string, unknown>).title as string);
+    }
+  }
+  return titles;
+}
+
+/**
+ * Toggle whatever separates `current` from `desired` titles, returning the
+ * reason each failed title failed. Mirrors `applyAssignmentDiff` — see there
+ * for why failures are collected rather than thrown.
+ */
+async function applyTagDiff(
+  client: FizzyClient,
+  accountSlug: string,
+  cardNumber: string,
+  desired: string[],
+  current: string[]
+): Promise<Map<string, string>> {
+  const reasons = new Map<string, string>();
+  const toAdd = desired.filter((title) => !current.includes(title));
+  const toRemove = current.filter((title) => !desired.includes(title));
+
+  for (const title of [...toAdd, ...toRemove]) {
+    try {
+      await client.toggleCardTag(accountSlug, cardNumber, title);
+    } catch (error) {
+      reasons.set(title, error instanceof Error ? error.message : String(error));
+    }
+  }
+  return reasons;
+}
+
+/**
+ * Describe the difference between the tag titles that were asked for and the
+ * ones the card actually came back with. Mirrors `describeAssignmentGaps` —
+ * see there for why the toggles are never taken at their word.
+ */
+function describeTagGaps(
+  desired: string[],
+  tagsOnCard: string[] | undefined,
+  reasons: Map<string, string>,
+  options: { replacesRoster: boolean }
+): string[] {
+  const because = (title: string) => {
+    const reason = reasons.get(title);
+    return reason ? ` (${reason})` : "";
+  };
+
+  if (!tagsOnCard) {
+    return [...reasons].map(
+      ([title, reason]) => `Tag change for "${title}" failed: ${reason}`
+    );
+  }
+
+  const warnings = desired
+    .filter((title) => !tagsOnCard.includes(title))
+    .map((title) => `Tag "${title}" was requested but is not present${because(title)}`);
+
+  if (options.replacesRoster) {
+    warnings.push(
+      ...tagsOnCard
+        .filter((title) => !desired.includes(title))
+        .map((title) => `Tag "${title}" is still present${because(title)}`)
+    );
+  }
+  return warnings;
 }
 
 /**
@@ -453,152 +638,377 @@ export const toolHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  // Assignments are applied *after* the card exists rather than in the create
-  // payload: the upstream controller permits only title/description/image/
-  // created_at/last_active_at, so an `assignee_ids` key in the card body is
-  // dropped by strong params and the card is created unassigned with no error
-  // anywhere in the response (issue #9).
+  // Assignments, column placement, and tags are all applied *after* the card
+  // exists rather than in the create payload: the upstream controller permits
+  // only title/description/image/created_at/last_active_at, so
+  // `assignee_ids`/`column_id`/`tag_ids` keys in the card body are dropped by
+  // strong params with no error anywhere in the response (issue #9, issue
+  // #44). `status` is gone entirely — there is no JSON route that creates a
+  // draft card or moves one back to draft, so create always gets upstream's
+  // default ("published") and fizzy_close_card/fizzy_reopen_card cover the
+  // rest of the lifecycle.
   fizzy_create_card: async (client, args) => {
+    rejectStatusField(args);
     const accountSlug = args.account_slug as string;
     const assigneeIds = parseAssigneeIds(args.assignee_ids);
+    const tagIds = parseTagIds(args.tag_ids);
+    const columnId = parseColumnId(args.column_id);
+
+    // Resolved to titles before the card exists at all: an unknown tag id
+    // must fail here, not after the card is created and toggleCardTag mints
+    // a garbage tag named after the raw id (see resolveTagTitles).
+    const desiredTagTitles =
+      tagIds === undefined
+        ? undefined
+        : tagIds.length === 0
+          ? []
+          : await resolveTagTitles(client, accountSlug, tagIds);
 
     const card = await client.createCard(accountSlug, args.board_id as string, {
       title: args.title as string,
       description: args.description as string,
-      status: args.status as "draft" | "published" | undefined,
-      column_id: args.column_id as string,
-      tag_ids: args.tag_ids as string[],
       due_on: args.due_on as string,
     });
 
-    if (!assigneeIds || assigneeIds.length === 0) return card;
+    const wantsColumn = columnId !== undefined;
+    const wantsTags = desiredTagTitles !== undefined && desiredTagTitles.length > 0;
+    const wantsAssignees = assigneeIds !== undefined && assigneeIds.length > 0;
+
+    if (!wantsColumn && !wantsTags && !wantsAssignees) return card;
 
     const cardNumber = createdCardNumber(card);
     if (!cardNumber) {
-      return {
-        ...card,
-        assignment_warnings: [
+      const warnings: Record<string, string[]> = {};
+      if (wantsAssignees) {
+        warnings.assignment_warnings = [
           "Card created, but its number could not be read from the response, " +
           "so no assignments were applied. Use fizzy_toggle_card_assignment to assign users.",
-        ],
-      };
+        ];
+      }
+      if (wantsColumn) {
+        warnings.column_warnings = [
+          "Card created, but its number could not be read from the response, so it was not " +
+          `moved to column ${columnId}. Use fizzy_move_card_to_column to move it.`,
+        ];
+      }
+      if (wantsTags) {
+        warnings.tag_warnings = [
+          "Card created, but its number could not be read from the response, so no tags " +
+          "were applied. Use fizzy_toggle_card_tag to add them.",
+        ];
+      }
+      return { ...card, ...warnings };
     }
 
-    // A new card has no assignments at all, so the whole requested set is the
-    // diff — no need to read the roster first.
-    const reasons = await applyAssignmentDiff(client, accountSlug, cardNumber, assigneeIds, []);
+    // Upstream's `triage_into(column)` raises if the column isn't on the
+    // card's board, and there's no way to check that without attempting the
+    // move — so a bad column id is reported as a warning rather than failing
+    // a create that has already happened.
+    let columnMoveError: string | undefined;
+    if (wantsColumn) {
+      try {
+        await client.moveCardToColumn(accountSlug, cardNumber, columnId as string);
+      } catch (error) {
+        columnMoveError = error instanceof Error ? error.message : String(error);
+      }
+    }
 
-    // Re-read the card so `assignees` reflects the assignments just made. The
-    // create response is rendered before any of them exist, and returning it
-    // unchanged is what made the original failure invisible.
-    let assigned: FizzyCard;
+    // A new card starts with no tags and no assignments at all, so the whole
+    // requested set is the diff in both cases — no need to read anything first.
+    const tagReasons = wantsTags
+      ? await applyTagDiff(client, accountSlug, cardNumber, desiredTagTitles as string[], [])
+      : new Map<string, string>();
+    const assignmentReasons = wantsAssignees
+      ? await applyAssignmentDiff(client, accountSlug, cardNumber, assigneeIds as string[], [])
+      : new Map<string, string>();
+
+    // Re-read the card once so column/tags/assignees reflect what was just
+    // done — the create response above is rendered before any of it happens.
+    let refreshed: FizzyCard;
     try {
-      assigned = await client.getCard(accountSlug, cardNumber);
+      refreshed = await client.getCard(accountSlug, cardNumber);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      return {
-        ...card,
-        assignment_warnings: [
-          ...describeAssignmentGaps(assigneeIds, undefined, reasons, { replacesRoster: false }),
+      const warnings: Record<string, string[]> = {};
+      if (wantsAssignees) {
+        warnings.assignment_warnings = [
+          ...describeAssignmentGaps(assigneeIds as string[], undefined, assignmentReasons, {
+            replacesRoster: false,
+          }),
           `Assignments were applied but the card could not be re-read (${reason}), so ` +
           "the 'assignees' field above is from before they were made and may be wrong.",
-        ],
-      };
+        ];
+      }
+      if (wantsColumn) {
+        warnings.column_warnings = [
+          columnMoveError
+            ? `Card was not moved to column ${columnId} (${columnMoveError})`
+            : `The card was moved to column ${columnId}, but it could not be re-read ` +
+              `(${reason}), so the 'column' field above is from before the move and may be wrong.`,
+        ];
+      }
+      if (wantsTags) {
+        warnings.tag_warnings = [
+          ...describeTagGaps(desiredTagTitles as string[], undefined, tagReasons, {
+            replacesRoster: false,
+          }),
+          `Tags were applied but the card could not be re-read (${reason}), so ` +
+          "the 'tags' field above is from before they were made and may be wrong.",
+        ];
+      }
+      return { ...card, ...warnings };
     }
 
-    const roster = assigneeRoster(assigned);
-    const warnings = describeAssignmentGaps(assigneeIds, roster, reasons, {
-      // Creating a card doesn't claim ownership of anyone else's assignment —
-      // a self-assignment landing alongside this call is not a failure.
-      replacesRoster: false,
-    });
-    if (!roster) {
-      // Over five assignees the API stops listing them, so a requested user that
-      // didn't take can no longer be spotted. Say so rather than let a
-      // warning-free response imply the whole set was confirmed.
-      warnings.unshift(
-        "The card reports more than 5 assignees, so the API no longer lists them all and " +
-        "the requested assignments could not be verified."
+    const warnings: Record<string, string[]> = {};
+
+    if (wantsAssignees) {
+      const roster = assigneeRoster(refreshed);
+      const assignmentWarnings = describeAssignmentGaps(
+        assigneeIds as string[],
+        roster,
+        assignmentReasons,
+        // Creating a card doesn't claim ownership of anyone else's
+        // assignment — a self-assignment landing alongside this call is not
+        // a failure.
+        { replacesRoster: false }
       );
+      if (!roster) {
+        // Over five assignees the API stops listing them, so a requested user
+        // that didn't take can no longer be spotted. Say so rather than let a
+        // warning-free response imply the whole set was confirmed.
+        assignmentWarnings.unshift(
+          "The card reports more than 5 assignees, so the API no longer lists them all and " +
+          "the requested assignments could not be verified."
+        );
+      }
+      if (assignmentWarnings.length > 0) warnings.assignment_warnings = assignmentWarnings;
     }
-    return warnings.length > 0 ? { ...assigned, assignment_warnings: warnings } : assigned;
+
+    if (wantsColumn) {
+      const actualColumnId = refreshed.column?.id;
+      const columnWarnings = columnMoveError
+        ? [`Card was not moved to column ${columnId} (${columnMoveError})`]
+        : actualColumnId === columnId
+          ? []
+          : [`Card was not moved to column ${columnId}`];
+      if (columnWarnings.length > 0) warnings.column_warnings = columnWarnings;
+    }
+
+    if (wantsTags) {
+      // Only the desired titles are checked on create — a brand-new card has
+      // nothing else that could count as an "extra" tag.
+      const tagWarnings = describeTagGaps(
+        desiredTagTitles as string[],
+        tagTitlesOf(refreshed),
+        tagReasons,
+        { replacesRoster: false }
+      );
+      if (tagWarnings.length > 0) warnings.tag_warnings = tagWarnings;
+    }
+
+    return Object.keys(warnings).length > 0 ? { ...refreshed, ...warnings } : refreshed;
   },
 
   fizzy_update_card: async (client, args) => {
+    rejectStatusField(args);
     const accountSlug = args.account_slug as string;
     const cardId = args.card_id as string;
     const desiredAssignees = parseAssigneeIds(args.assignee_ids);
-
-    // `assignee_ids` is documented as a full replacement, and the only way to
-    // honour that against a toggle-based endpoint is to diff it against the
-    // current roster. Read that before mutating anything, so a card we cannot
-    // safely replace assignments on fails before its title changes.
-    let currentAssignees: string[] = [];
-    if (desiredAssignees) {
-      const existing = await client.getCard(accountSlug, cardId);
-      if (existing.has_more_assignees) {
-        throw new Error(
-          `Card ${cardId} has more than 5 assignees, and the API only reports the first 5. ` +
-          "Replacing the assignee list would leave the ones it doesn't report still assigned. " +
-          "Use fizzy_toggle_card_assignment to change this card's assignments individually."
-        );
-      }
-      currentAssignees = (existing.assignees ?? []).map((user) => user.id);
-    }
+    const tagIds = parseTagIds(args.tag_ids);
+    const columnId = parseColumnId(args.column_id);
 
     const cardFields = {
       title: args.title as string,
       description: args.description as string,
-      status: args.status as "draft" | "published" | "archived" | undefined,
-      column_id: args.column_id as string,
-      tag_ids: args.tag_ids as string[],
       due_on: args.due_on as string,
     };
+    const hasCardFields = Object.values(cardFields).some((value) => value !== undefined);
 
-    // Only send the card payload when it actually carries something. Upstream's
-    // `params.expect(card: [...])` raises ParameterMissing on an empty hash, so
-    // an assignments-only update would otherwise serialize to `{"card":{}}` and
-    // come back 400 before reaching the assignment calls below.
-    if (Object.values(cardFields).some((value) => value !== undefined)) {
-      await client.updateCard(accountSlug, cardId, cardFields);
-    } else if (!desiredAssignees) {
+    if (
+      !hasCardFields &&
+      columnId === undefined &&
+      tagIds === undefined &&
+      desiredAssignees === undefined
+    ) {
       throw new Error(
         `No changes given for card ${cardId}. Pass at least one of title, description, ` +
-        "status, column_id, tag_ids, due_on or assignee_ids."
+        "due_on, column_id, tag_ids or assignee_ids."
       );
     }
 
-    if (!desiredAssignees) return `Card ${cardId} updated successfully`;
+    // Tag ids are resolved to titles before anything else changes — see
+    // resolveTagTitles — so an unknown id fails before title, description,
+    // column, tags, or assignees are touched at all.
+    const desiredTagTitles =
+      tagIds === undefined
+        ? undefined
+        : tagIds.length === 0
+          ? []
+          : await resolveTagTitles(client, accountSlug, tagIds);
 
-    const reasons = await applyAssignmentDiff(
-      client,
-      accountSlug,
-      cardId,
-      desiredAssignees,
-      currentAssignees
-    );
+    // `assignee_ids` and `tag_ids` are documented as full replacements, and
+    // `column_id` needs the card's current column to skip a no-op move. The
+    // only way to honour any of that against toggle-based endpoints is to
+    // read the card first — before mutating anything, so a card that can't be
+    // safely changed this way fails before its title changes.
+    let currentAssignees: string[] = [];
+    let currentTags: string[] = [];
+    let currentColumnId: string | undefined;
+    if (desiredAssignees !== undefined || desiredTagTitles !== undefined || columnId !== undefined) {
+      const existing = await client.getCard(accountSlug, cardId);
+      if (desiredAssignees !== undefined) {
+        if (existing.has_more_assignees) {
+          throw new Error(
+            `Card ${cardId} has more than 5 assignees, and the API only reports the first 5. ` +
+            "Replacing the assignee list would leave the ones it doesn't report still assigned. " +
+            "Use fizzy_toggle_card_assignment to change this card's assignments individually."
+          );
+        }
+        currentAssignees = (existing.assignees ?? []).map((user) => user.id);
+      }
+      if (desiredTagTitles !== undefined) {
+        currentTags = tagTitlesOf(existing);
+      }
+      if (columnId !== undefined) {
+        currentColumnId = existing.column?.id;
+      }
+    }
 
-    // Report the roster the card actually ends up with, not the one the toggles
-    // were supposed to produce — see describeAssignmentGaps for why they differ.
-    // This runs even when the diff was empty: "already correct" is a claim about
-    // the pre-flight snapshot, and the roster can have moved since.
-    let roster: string[] | undefined;
+    // Only send the card payload when it actually carries something. Upstream's
+    // `params.expect(card: [...])` raises ParameterMissing on an empty hash, so
+    // a column/tags/assignments-only update would otherwise serialize to
+    // `{"card":{}}` and come back 400 before reaching the calls below.
+    if (hasCardFields) {
+      await client.updateCard(accountSlug, cardId, cardFields);
+    }
+
+    // Skip the triage call entirely when the card is already there — upstream
+    // tracks a "triaged" event and calls `resume` on every triage_into, even
+    // into the column the card already occupies.
+    let columnMoveError: string | undefined;
+    if (columnId !== undefined && currentColumnId !== columnId) {
+      try {
+        await client.moveCardToColumn(accountSlug, cardId, columnId);
+      } catch (error) {
+        columnMoveError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    const tagReasons =
+      desiredTagTitles !== undefined
+        ? await applyTagDiff(client, accountSlug, cardId, desiredTagTitles, currentTags)
+        : new Map<string, string>();
+
+    const assignmentReasons =
+      desiredAssignees !== undefined
+        ? await applyAssignmentDiff(client, accountSlug, cardId, desiredAssignees, currentAssignees)
+        : new Map<string, string>();
+
+    if (columnId === undefined && desiredTagTitles === undefined && desiredAssignees === undefined) {
+      return `Card ${cardId} updated successfully`;
+    }
+
+    // Report the state the card actually ends up in, not the one the toggles
+    // were supposed to produce — see describeAssignmentGaps for why they can
+    // differ. This runs even when every diff was empty: "already correct" is
+    // a claim about the pre-flight snapshot, and the card can have moved
+    // since.
+    let refreshed: FizzyCard | undefined;
     let readError: string | undefined;
     try {
-      roster = assigneeRoster(await client.getCard(accountSlug, cardId));
+      refreshed = await client.getCard(accountSlug, cardId);
     } catch (error) {
       readError = error instanceof Error ? error.message : String(error);
     }
 
-    const warnings = describeAssignmentGaps(desiredAssignees, roster, reasons, {
-      replacesRoster: true,
-    });
-    const summary = roster
-      ? `Card ${cardId} updated successfully (assignees: ` +
-        `${roster.filter((id) => !currentAssignees.includes(id)).length} added, ` +
-        `${currentAssignees.filter((id) => !roster.includes(id)).length} removed)`
-      : `Card ${cardId} updated successfully, but the resulting assignee list could not be ` +
-        `verified (${readError ?? "the card now reports more than 5 assignees"})`;
+    if (!refreshed) {
+      const summary =
+        `Card ${cardId} update completed, but the requested post-update state could not ` +
+        `be verified (${readError})`;
+
+      const warnings: string[] = [];
+      if (columnId !== undefined && columnMoveError) {
+        warnings.push(`Card was not moved to column ${columnId} (${columnMoveError})`);
+      }
+      if (desiredTagTitles !== undefined) {
+        warnings.push(
+          ...describeTagGaps(desiredTagTitles, undefined, tagReasons, { replacesRoster: false })
+        );
+      }
+      if (desiredAssignees !== undefined) {
+        warnings.push(
+          ...describeAssignmentGaps(desiredAssignees, undefined, assignmentReasons, {
+            replacesRoster: false,
+          })
+        );
+      }
+      return warnings.length > 0 ? `${summary}. ${warnings.join("; ")}` : summary;
+    }
+
+    // `parts` carries only positive outcomes — a mismatch or failure is
+    // reported once, in `warnings`, not duplicated here as a negative part.
+    const parts: string[] = [];
+    const warnings: string[] = [];
+
+    if (columnId !== undefined) {
+      const actualColumnId = refreshed.column?.id;
+      if (columnMoveError) {
+        warnings.push(`Card was not moved to column ${columnId} (${columnMoveError})`);
+      } else if (actualColumnId === columnId) {
+        // Distinguish a no-op (the card was already there, so no triage call
+        // was made) from an actual move — see the skip above.
+        parts.push(
+          currentColumnId === columnId
+            ? `already in column ${columnId}`
+            : `moved to column ${columnId}`
+        );
+      } else {
+        warnings.push(`Card was not moved to column ${columnId}`);
+      }
+    }
+
+    if (desiredTagTitles !== undefined) {
+      const tagsOnCard = tagTitlesOf(refreshed);
+      const added = tagsOnCard.filter((title) => !currentTags.includes(title)).length;
+      const removed = currentTags.filter((title) => !tagsOnCard.includes(title)).length;
+      parts.push(`tags: ${added} added, ${removed} removed`);
+      warnings.push(
+        ...describeTagGaps(desiredTagTitles, tagsOnCard, tagReasons, { replacesRoster: true })
+      );
+    }
+
+    if (desiredAssignees !== undefined) {
+      const roster = assigneeRoster(refreshed);
+      if (roster) {
+        const added = roster.filter((id) => !currentAssignees.includes(id)).length;
+        const removed = currentAssignees.filter((id) => !roster.includes(id)).length;
+        parts.push(`assignees: ${added} added, ${removed} removed`);
+        warnings.push(
+          ...describeAssignmentGaps(desiredAssignees, roster, assignmentReasons, {
+            replacesRoster: true,
+          })
+        );
+      } else {
+        // Over five assignees the API stops listing them, so the resulting
+        // roster can no longer be compared against what was asked for.
+        warnings.push(
+          "Assignee list could not be verified (the card now reports more than 5 assignees)",
+          ...describeAssignmentGaps(desiredAssignees, undefined, assignmentReasons, {
+            replacesRoster: false,
+          })
+        );
+      }
+    }
+
+    // A warning-free result is reported as success; any warning at all — a
+    // mismatch, a failed toggle, an unverifiable roster — means the update
+    // didn't fully land as asked, so the headline must say so rather than
+    // claiming "updated successfully" over a caveat.
+    const prefix =
+      warnings.length > 0
+        ? `Card ${cardId} update completed with warnings`
+        : `Card ${cardId} updated successfully`;
+    const summary = parts.length > 0 ? `${prefix} (${parts.join("; ")})` : prefix;
 
     return warnings.length > 0 ? `${summary}. ${warnings.join("; ")}` : summary;
   },

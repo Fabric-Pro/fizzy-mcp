@@ -131,27 +131,30 @@ export interface FizzyStep {
 
 // Request types
 //
-// `assignee_ids` is deliberately absent from both card request types. Upstream's
-// `CardsController#card_params` permits only
-// `[ :title, :description, :image, :created_at, :last_active_at ]`, so Rails
-// strong params silently drop it and the card comes back unassigned. Assignments
-// are only reachable through `POST /:slug/cards/:number/assignments`, which the
-// card handlers call after the create/update lands.
+// `assignee_ids`, `column_id`, `tag_ids`, and `status` are all deliberately
+// absent from both card request types. Upstream's `CardsController#card_params`
+// permits only `[ :title, :description, :image, :created_at, :last_active_at ]`,
+// so Rails strong params silently drop any of the four and the card is
+// created/updated as if they had never been sent — no error anywhere in the
+// response. Each has its own endpoint instead, which the card handlers call
+// after the create/update lands:
+//   - assignee_ids -> POST /:slug/cards/:number/assignments (toggles one id)
+//   - column_id    -> POST /:slug/cards/:number/triage (moves into a column)
+//   - tag_ids      -> POST /:slug/cards/:number/taggings (toggles by title,
+//                     not id — ids are resolved via GET /:slug/tags first)
+// `status` has no replacement at all: there is no JSON route that creates a
+// draft card or moves a published one back to draft. Create always gets
+// upstream's default of "published"; fizzy_close_card/fizzy_reopen_card cover
+// the rest of the lifecycle.
 export interface CreateCardRequest {
   title: string;
   description?: string;
-  status?: "draft" | "published";
-  column_id?: string;
-  tag_ids?: string[];
   due_on?: string;
 }
 
 export interface UpdateCardRequest {
   title?: string;
   description?: string;
-  status?: "draft" | "published" | "archived";
-  column_id?: string;
-  tag_ids?: string[];
   due_on?: string;
 }
 

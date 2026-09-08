@@ -88,16 +88,6 @@ export const fieldsSchema = z
     "single-item fetch tool) once you need complete detail on a specific item."
   );
 
-// Status schemas with detailed descriptions
-export const cardStatusSchema = z
-  .enum(["draft", "published", "archived"])
-  .describe(
-    "Card visibility status: " +
-    "'draft' = not yet published (hidden from general view), " +
-    "'published' = active and visible to team, " +
-    "'archived' = completed/closed (hidden from active view)"
-  );
-
 // Indexed by schema for special card filters
 export const indexedBySchema = z
   .enum(["all", "closed", "not_now", "stalled", "postponing_soon", "golden"])
@@ -249,13 +239,14 @@ export const createCardSchema = z.object({
     "<ul><li>lists</li></ul>, <pre>code blocks</pre>. " +
     "Omit for cards that don't need detailed descriptions."
   ),
-  status: z.enum(["draft", "published"]).optional().describe(
-    "Initial card status. 'draft' = not yet visible to team, 'published' = visible (default). " +
-    "Draft cards are useful for preparing work before sharing."
-  ),
   column_id: z.string().optional().describe(
     "Workflow column to place the card in. Omit to place card in triage (default). " +
-    "Cards in triage haven't been prioritized into workflow yet."
+    "Cards in triage haven't been prioritized into workflow yet. The column must belong " +
+    "to the card's board — get valid column IDs from fizzy_get_columns. Applied after the " +
+    "card is created (upstream has no way to set it at creation time); a failure (e.g. the " +
+    "column isn't on this board) is reported in a 'column_warnings' field on the created " +
+    "card rather than failing the create, and the result is read back to confirm the move " +
+    "actually took, with any mismatch also reported there."
   ),
   assignee_ids: z.array(z.string()).optional().describe(
     "Array of user IDs to assign to this card. Assigned users receive notifications " +
@@ -264,8 +255,13 @@ export const createCardSchema = z.object({
     "an 'assignment_warnings' field on the created card rather than failing the create."
   ),
   tag_ids: z.array(z.string()).optional().describe(
-    "Array of tag IDs to categorize the card. Tags help with organization and filtering. " +
-    "Omit to create card without tags."
+    "Array of tag IDs to categorize the card. Get valid tag IDs from fizzy_get_tags. " +
+    "Every id must resolve to an existing tag; an unknown id fails the whole call before " +
+    "the card is created (the underlying endpoint takes a tag title, not an id, and would " +
+    "otherwise silently mint a new tag from the raw id string). Omit to create the card " +
+    "without tags. Applied after the card exists; the result is read back to confirm every " +
+    "requested tag landed, with any that didn't reported in a 'tag_warnings' field on the " +
+    "created card. Use fizzy_toggle_card_tag to add or remove a single tag later."
   ),
   due_on: z.string().optional().describe(
     "Due date in ISO 8601 format (e.g., '2024-12-31' or '2024-12-31T17:00:00Z'). " +
@@ -283,13 +279,13 @@ export const updateCardSchema = z.object({
     "New card description (HTML supported). Omit to keep current description. " +
     "⚠️ This replaces the entire description - it's not a partial update."
   ),
-  status: cardStatusSchema.optional().describe(
-    "New card status. Omit to keep current status. " +
-    "Note: Use fizzy_close_card/fizzy_reopen_card for archiving workflows."
-  ),
   column_id: z.string().optional().describe(
-    "Move card to specified workflow column. Omit to keep in current location. " +
-    "⚠️ This replaces column assignment completely."
+    "Move card to the specified workflow column, which must belong to this card's board — " +
+    "get valid column IDs from fizzy_get_columns. Omit to keep the card in its current " +
+    "location. A no-op when the card is already in this column (no upstream call is made, " +
+    "so it won't be re-flagged as freshly triaged). The result is read back to confirm the " +
+    "move took; any mismatch is reported in the response text. Use fizzy_send_card_to_triage " +
+    "or fizzy_move_card_to_not_now to take a card out of a column instead."
   ),
   assignee_ids: z.array(z.string()).optional().describe(
     "New array of assignee user IDs. Omit to keep current assignments. " +
@@ -301,9 +297,14 @@ export const updateCardSchema = z.object({
     "names any user that did not end up in the state you asked for."
   ),
   tag_ids: z.array(z.string()).optional().describe(
-    "New array of tag IDs. Omit to keep current tags. " +
-    "⚠️ This replaces all tags - it's not additive. " +
-    "Note: Use fizzy_toggle_card_tag for adding/removing individual tags."
+    "New array of tag IDs — get valid tag IDs from fizzy_get_tags. Omit to keep current " +
+    "tags. ⚠️ This replaces the entire tag set, not additive — pass [] to remove every tag. " +
+    "Every id must resolve to an existing tag; an unknown id fails the whole call before " +
+    "anything else on the card changes (the underlying endpoint takes a tag title, not an " +
+    "id, and would otherwise silently mint a new tag from the raw id string). The resulting " +
+    "tag list is read back and reported: the response text names any requested tag that " +
+    "didn't land and any extra tag that's still present. " +
+    "Use fizzy_toggle_card_tag for a single add/remove instead."
   ),
   due_on: z.string().optional().describe(
     "New due date in ISO 8601 format. Omit to keep current due date. " +
