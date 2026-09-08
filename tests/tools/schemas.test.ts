@@ -139,7 +139,6 @@ describe("Tool Schemas", () => {
           board_id: "board1",
           title: "New Card",
           description: "<p>HTML content</p>",
-          status: "published",
           column_id: "col1",
           assignee_ids: ["user1"],
           tag_ids: ["tag1"],

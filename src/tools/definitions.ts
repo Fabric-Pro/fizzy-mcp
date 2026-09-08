@@ -196,7 +196,7 @@ export const TOOL_DEFINITIONS = {
       title: "Create Card",
       description:
         "Create a new card on a board with optional title, description (HTML supported), " +
-        "status (draft/published), column placement, assignees, tags, and due date. " +
+        "column placement, assignees, tags, and due date. " +
         "Cards start in triage by default unless a column is specified.",
       schema: schemas.createCardSchema,
       annotations: {
@@ -208,7 +208,7 @@ export const TOOL_DEFINITIONS = {
       name: "fizzy_update_card",
       title: "Update Card",
       description:
-        "Update an existing card's properties including title, description, status, " +
+        "Update an existing card's properties including title, description, " +
         "column placement, assignees, tags, and due date. " +
         "Partial updates are supported - only provided fields will be changed.",
       schema: schemas.updateCardSchema,
