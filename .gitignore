@@ -49,6 +49,7 @@ AGENTS.local.md
 # Agent configs (local permission allowlists — never commit)
 .fabric/settings.json
 .fabric/settings.local.json
+.codex/
 
 # Claude Code personal overrides (never commit)
 .claude/settings.local.json
