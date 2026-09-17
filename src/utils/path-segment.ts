@@ -58,7 +58,7 @@ const MAX_PATH_SEGMENT_LENGTH = 256;
  * which is not echoed back. These messages surface verbatim to the model, so
  * they say what to pass instead of just refusing.
  *
- * @throws Error if `value` is empty, is `.` or `..`, is longer than
+ * @throws Error if `value` is not a string at all, is empty, is `.` or `..`, is longer than
  *   {@link MAX_PATH_SEGMENT_LENGTH}, or contains anything outside
  *   `[A-Za-z0-9._~-]`. That excludes `/` and `\` (cannot introduce a segment
  *   of their own), `%` (cannot smuggle an encoded one), `?` and `#` (cannot
@@ -66,6 +66,18 @@ const MAX_PATH_SEGMENT_LENGTH = 256;
  *   characters — which is what matters, not what the charset admits.
  */
 export function assertPathSegment(value: string, name: string): string {
+  // `value` is typed `string`, but nothing guarantees it is one at runtime: the
+  // Cloudflare transport dispatches raw MCP arguments with no Zod validation at
+  // all (`cloudflare/mcp-session.ts`), so a tool that reads an id the caller
+  // never sent hands this `undefined`. Checked before anything touches
+  // `.length`, which would otherwise throw a bare "Cannot read properties of
+  // undefined (reading 'length')" naming neither the tool nor the argument
+  // (issue #96) — every other rejection below names the argument, and a missing
+  // one is the most likely of the lot.
+  if (typeof value !== "string") {
+    throw new Error(`${name} is required and must be a Fizzy identifier`);
+  }
+
   if (value.length > MAX_PATH_SEGMENT_LENGTH) {
     throw new Error(`${name} is too long to be a valid Fizzy identifier`);
   }

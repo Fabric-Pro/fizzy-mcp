@@ -43,6 +43,36 @@ describe("assertPathSegment", () => {
     expect(() => assertPathSegment(value, "board_id")).toThrow(/board_id/);
   });
 
+  // `value` is typed `string`, but the Cloudflare transport dispatches raw MCP
+  // arguments without running Zod, so a tool reading an id the caller never sent
+  // hands this `undefined`. Before the typeof check, `value.length` threw a bare
+  // "Cannot read properties of undefined (reading 'length')" that named neither
+  // the tool nor the argument (issue #96).
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["a number", 2547],
+    ["an object", {}],
+    ["an array", ["2547"]],
+  ])("rejects %s with a message naming the argument", (_label, value) => {
+    expect(() =>
+      assertPathSegment(value as unknown as string, "card_id")
+    ).toThrow(/card_id is required/);
+  });
+
+  it("does not throw a TypeError when the argument is missing", () => {
+    // The whole point of the check: the failure has to arrive as a normal
+    // Error the transport can report, not as a TypeError from property access.
+    try {
+      assertPathSegment(undefined as unknown as string, "card_id");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(TypeError);
+      expect((error as Error).message).not.toMatch(/Cannot read properties/);
+    }
+  });
+
   it.each([
     ["extra path segments", "123456/cards"],
     ["an embedded traversal", "123456/../999999"],
