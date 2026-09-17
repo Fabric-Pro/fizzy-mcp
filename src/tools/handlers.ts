@@ -15,7 +15,7 @@ import {
   type CardListOptions,
   type FizzyCard,
 } from "../client/types.js";
-import { resolveCardNumber } from "../utils/card-resolver.js";
+import { resolveCardNumber, selectCardIdentifier } from "../utils/card-resolver.js";
 import { splitSearchTerms, type SearchTerms } from "../utils/search-terms.js";
 import { parseActionTextAttachments } from "../utils/action-text.js";
 import {
@@ -615,7 +615,10 @@ export const toolHandlers: Record<string, ToolHandler> = {
     const includeAttachments = parseIncludeAttachments(args.include_attachments);
     const card = await client.getCard(
       args.account_slug as string,
-      args.card_id as string
+      selectCardIdentifier(
+        args.card_id as string | undefined,
+        args.card_number as string | undefined
+      )
     );
     // Without the flag this returns the client's value untouched — the response
     // is byte-for-byte what it was before include_attachments existed.
@@ -812,7 +815,10 @@ export const toolHandlers: Record<string, ToolHandler> = {
   fizzy_update_card: async (client, args) => {
     rejectStatusField(args);
     const accountSlug = args.account_slug as string;
-    const cardId = args.card_id as string;
+    const cardId = selectCardIdentifier(
+      args.card_id as string | undefined,
+      args.card_number as string | undefined
+    );
     const desiredAssignees = parseAssigneeIds(args.assignee_ids);
     const tagIds = parseTagIds(args.tag_ids);
     const columnId = parseColumnId(args.column_id);
@@ -1014,8 +1020,12 @@ export const toolHandlers: Record<string, ToolHandler> = {
   },
 
   fizzy_delete_card: async (client, args) => {
-    await client.deleteCard(args.account_slug as string, args.card_id as string);
-    return `Card ${args.card_id} deleted successfully`;
+    const cardId = selectCardIdentifier(
+      args.card_id as string | undefined,
+      args.card_number as string | undefined
+    );
+    await client.deleteCard(args.account_slug as string, cardId);
+    return `Card ${cardId} deleted successfully`;
   },
 
   // ============ Card Action Tools ============

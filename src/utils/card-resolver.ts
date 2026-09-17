@@ -73,3 +73,43 @@ export async function resolveCardNumber(
 
   throw new Error(`Unable to resolve card number for card_id ${cardId}`);
 }
+
+/**
+ * Pick the identifier for the card-CRUD endpoints, which accept either
+ * `card_id` or `card_number` under whichever name the caller used.
+ *
+ * Unlike {@link resolveCardNumber} this makes no API call, because there is
+ * nothing to resolve: `GET`/`PUT`/`DELETE /:account_slug/cards/:id` looks the
+ * card up by its `number`, not by an id — upstream's `cards_controller.rb`
+ * does `find_by!(number: params[:id])` and `Card#to_param` returns
+ * `number.to_s` (see `utils/path-segment.ts`). Both argument names therefore
+ * address the same path slot, and whichever arrives is passed through
+ * untouched.
+ *
+ * `card_id` wins when both are given, so a caller that was already passing it
+ * keeps the exact request it had before the alias existed.
+ *
+ * The alias exists because 24 of the card tools take `card_number` while these
+ * three took only `card_id`: a model that had just called
+ * `fizzy_toggle_card_tag` would send `card_number` here too, and the undefined
+ * id then reached `assertPathSegment` as a bare TypeError (issue #96).
+ *
+ * @throws Error if neither identifier is supplied.
+ */
+export function selectCardIdentifier(
+  cardId?: string,
+  cardNumber?: string
+): string {
+  const selected = cardId ?? cardNumber;
+
+  // Enforced here rather than in the Zod schema because a `.refine()` would
+  // make the schema a ZodEffects and blank out every published field (see the
+  // note on commentCardSelectorBase in tools/schemas.ts), and because the
+  // Cloudflare transport runs no Zod validation at all — so this is the only
+  // check both transports share.
+  if (selected === undefined) {
+    throw new Error("card_id or card_number is required");
+  }
+
+  return selected;
+}

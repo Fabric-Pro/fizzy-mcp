@@ -220,9 +220,38 @@ export const includeAttachmentsSchema = z
     "exactly as it was before this option existed."
   );
 
-export const getCardSchema = z.object({
+// The card-CRUD endpoints resolve a card by its *number*, not by an id:
+// `GET`/`PUT`/`DELETE /:account_slug/cards/:id` runs `find_by!(number:)`
+// upstream (see `utils/path-segment.ts`). `card_id` and `card_number` therefore
+// name the same path slot on these three tools, and either is accepted — 24 of
+// the other card tools take `card_number`, so a model working through a card
+// sent it here too and hit an undefined id (issue #96).
+//
+// Both fields are optional for the reason commentCardSelectorBase documents
+// below — a `.refine()` would turn this into a ZodEffects and publish no fields
+// at all — and the "one of the two" rule is enforced a layer down by
+// selectCardIdentifier, which is also the only check the unvalidated Cloudflare
+// transport gets.
+const cardSelectorBase = z.object({
   account_slug: accountSlugSchema,
-  card_id: cardNumberSchema,
+  card_id: cardNumberSchema
+    .optional()
+    .describe(
+      "The card's number - the visible ID shown on the board, digits only (e.g., '123'). " +
+      "Despite the name, this tool resolves cards by number, so card_id and card_number " +
+      "are interchangeable here. Provide either one. " +
+      "Get card numbers from fizzy_get_cards."
+    ),
+  card_number: cardNumberSchema
+    .optional()
+    .describe(
+      "The card number - the visible ID shown on the board, digits only (e.g., '123'). " +
+      "Interchangeable with card_id on this tool. Provide either one. " +
+      "Get card numbers from fizzy_get_cards."
+    ),
+});
+
+export const getCardSchema = cardSelectorBase.extend({
   include_attachments: includeAttachmentsSchema,
 });
 
@@ -269,9 +298,7 @@ export const createCardSchema = z.object({
   ),
 });
 
-export const updateCardSchema = z.object({
-  account_slug: accountSlugSchema,
-  card_id: cardNumberSchema,
+export const updateCardSchema = cardSelectorBase.extend({
   title: z.string().optional().describe(
     "New card title. Omit to keep current title unchanged."
   ),
@@ -312,10 +339,8 @@ export const updateCardSchema = z.object({
   ),
 });
 
-export const deleteCardSchema = z.object({
-  account_slug: accountSlugSchema,
-  card_id: cardNumberSchema,
-});
+// Nothing beyond the selector itself.
+export const deleteCardSchema = cardSelectorBase;
 
 // Comment schemas with HTML formatting guidance.
 //
