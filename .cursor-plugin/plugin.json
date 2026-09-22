@@ -16,7 +16,6 @@
   "license": "MIT",
   "repository": "https://github.com/Fabric-Pro/fizzy-mcp",
   "logo": "assets/logo.jpg",
-  "mcpServers": "mcp.json",
   "variables": {
     "type": "object",
     "properties": {
