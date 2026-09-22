@@ -6,9 +6,10 @@
  * Validation lives here rather than in the Zod schema, for two reasons: the
  * Cloudflare transport executes raw arguments without Zod at all — the same
  * reason `parsePage` in tools/handlers.ts validates by hand — and the
- * either/or rules cannot be expressed as Zod refinements without turning the
- * schema into a ZodEffects, which `McpServer.registerTool` publishes to stdio
- * clients as an empty property list. So this is the only place they live.
+ * either/or rules are kept out of the schema by policy: under Zod 3 a
+ * refinement turned it into a ZodEffects, which `McpServer.registerTool`
+ * published to stdio clients as an empty property list. So this is the only
+ * place they live.
  *
  * For the read direction that reasoning is not a convenience, it is the
  * security boundary: the tokens validated below are interpolated into a URL

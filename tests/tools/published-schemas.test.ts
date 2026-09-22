@@ -1,12 +1,15 @@
 /**
  * Guards the parameter list every tool publishes to clients.
  *
- * McpServer reads a tool's fields off its schema's shape. A `.refine()`d schema
- * is a ZodEffects, which has no shape, so the SDK falls back to
- * `{"type":"object","properties":{}}` and the tool arrives at the client with no
- * discoverable arguments. It still executes — the SDK validates against the
- * unwrapped schema at call time — so nothing fails loudly, and two tools shipped
+ * McpServer reads a tool's fields off its schema's shape. Under Zod 3 a
+ * `.refine()`d schema was a ZodEffects, which has no shape, so the SDK fell back
+ * to `{"type":"object","properties":{}}` and the tool arrived at the client with
+ * no discoverable arguments. It still executed — the SDK validates against the
+ * unwrapped schema at call time — so nothing failed loudly, and two tools shipped
  * that way unnoticed.
+ *
+ * Zod 4 removed ZodEffects and a refined object keeps its shape, so `.refine()`
+ * no longer does this; `.transform()` still wraps, as a ZodPipe, and would.
  *
  * These tests assert the property list directly rather than trusting that a
  * schema "looks fine", because the failure is invisible in the schema source.
@@ -32,14 +35,14 @@ describe("published tool schemas", () => {
     expect(unreadable).toEqual([]);
   });
 
-  it("no exported schema is wrapped in ZodEffects", () => {
-    const refined = Object.entries(schemas)
-      .filter(([, schema]) => schema instanceof z.ZodEffects)
+  it("no exported schema is a transform pipe, which would hide its shape", () => {
+    const wrapped = Object.entries(schemas)
+      .filter(([, schema]) => schema instanceof z.ZodPipe)
       .map(([name]) => name);
 
     // Refinements belong in the handlers, which must own them anyway: the
     // Cloudflare transport dispatches raw arguments and never runs Zod.
-    expect(refined).toEqual([]);
+    expect(wrapped).toEqual([]);
   });
 
   it("only the genuinely argument-less tools publish an empty property list", () => {
@@ -56,9 +59,9 @@ describe("published tool schemas", () => {
 
   it("the two tools that regressed publish their full parameter lists", () => {
     // Read off the Zod shape, which is the thing McpServer reads. Asserting the
-    // Cloudflare JSON Schema here would prove nothing: zod-to-json-schema
-    // unwraps ZodEffects by default, so it emitted the full list even while the
-    // bug was live.
+    // Cloudflare JSON Schema here would prove nothing: its converter (then
+    // zod-to-json-schema) unwrapped ZodEffects by default, so it emitted the
+    // full list even while the bug was live.
     const shapeOf = (name: string) =>
       Object.keys(
         ((ALL_TOOLS.find((t) => t.name === name)!.schema as z.ZodObject<z.ZodRawShape>) ?? {})
@@ -93,8 +96,8 @@ describe("published tool schemas", () => {
   });
 
   it("the Cloudflare path was never affected and still publishes everything", () => {
-    // Recorded deliberately: this path unwraps ZodEffects, so it stayed correct
-    // throughout. It is here to catch a regression in the other direction, not
+    // Recorded deliberately: this path unwrapped ZodEffects under Zod 3, so it
+    // stayed correct throughout. It is here to catch a regression in the other direction, not
     // to guard the bug this file is about.
     const published = new Map(
       buildMcpToolDefinitions().map((tool) => [

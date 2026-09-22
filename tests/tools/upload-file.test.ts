@@ -84,12 +84,13 @@ describe("fizzy_upload_file schema", () => {
     );
   });
 
-  // The either/or rules are intentionally NOT Zod refinements: a refined schema is
-  // a ZodEffects with no shape for McpServer.registerTool to read, so refining
-  // would publish an empty property list to stdio clients. resolveAttachment owns
-  // these rules instead — which it must anyway, since the Cloudflare transport
-  // never runs Zod. See the handler tests below and tests/utils/attachments.test.ts.
-  it("publishes a non-empty shape, which a refined schema would not", () => {
+  // The either/or rules are intentionally NOT Zod refinements: under Zod 3 a
+  // refined schema was a ZodEffects with no shape for McpServer.registerTool to
+  // read, so refining published an empty property list to stdio clients.
+  // resolveAttachment owns these rules instead — which it must anyway, since the
+  // Cloudflare transport never runs Zod. See the handler tests below and
+  // tests/utils/attachments.test.ts.
+  it("publishes a non-empty shape", () => {
     expect(Object.keys(uploadFileSchema.shape)).toEqual([
       "account_slug",
       "file_path",
