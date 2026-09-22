@@ -102,11 +102,11 @@ export function selectCardIdentifier(
 ): string {
   const selected = cardId ?? cardNumber;
 
-  // Enforced here rather than in the Zod schema because a `.refine()` would
-  // make the schema a ZodEffects and blank out every published field (see the
-  // note on commentCardSelectorBase in tools/schemas.ts), and because the
-  // Cloudflare transport runs no Zod validation at all — so this is the only
-  // check both transports share.
+  // Enforced here rather than in the Zod schema because the Cloudflare
+  // transport runs no Zod validation at all — so this is the only check both
+  // transports share — and because under Zod 3 a `.refine()` made the schema a
+  // ZodEffects and blanked out every published field (see the note on
+  // commentCardSelectorBase in tools/schemas.ts).
   if (selected === undefined) {
     throw new Error("card_id or card_number is required");
   }

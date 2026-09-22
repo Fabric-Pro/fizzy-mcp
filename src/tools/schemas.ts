@@ -187,9 +187,12 @@ export const getCardsSchema = z.object({
     "Errors if no usable word remains. Has no effect without `search`."
   ),
   // Use .min(1) rather than .positive(): both mean "page >= 1" for an integer, but
-  // .positive() is an *exclusive* bound, which zod-to-json-schema renders as the
-  // draft-04 `exclusiveMinimum: true` flag. Draft 2020-12 requires a numeric bound,
-  // so the exclusive form makes the whole tool list unusable for strict clients.
+  // .positive() is an *exclusive* bound and publishes as `exclusiveMinimum: 0`
+  // instead of `minimum: 1`. Under Zod 3's converter it published the draft-04
+  // `exclusiveMinimum: true` flag, which made the whole tool list unusable for
+  // strict clients; Zod 4 emits the numeric form, so that outage is gone, but the
+  // published bound would still change, so leave this as it is. The explicit
+  // .max() pins the upper bound Zod 4 would otherwise derive from .int() itself.
   page: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional().describe(
     "Page number to fetch (1-based). Card listings are paginated with a server-controlled, variable page size " +
     "(early pages are small, e.g. 15 cards; later pages are larger). Omit for the first page; " +
@@ -228,8 +231,8 @@ export const includeAttachmentsSchema = z
 // sent it here too and hit an undefined id (issue #96).
 //
 // Both fields are optional for the reason commentCardSelectorBase documents
-// below — a `.refine()` would turn this into a ZodEffects and publish no fields
-// at all — and the "one of the two" rule is enforced a layer down by
+// below — under Zod 3 a `.refine()` turned this into a ZodEffects that published
+// no fields at all — and the "one of the two" rule is enforced a layer down by
 // selectCardIdentifier, which is also the only check the unvalidated Cloudflare
 // transport gets.
 const cardSelectorBase = z.object({
@@ -344,10 +347,11 @@ export const deleteCardSchema = cardSelectorBase;
 
 // Comment schemas with HTML formatting guidance.
 //
-// These deliberately carry no `.refine()`. McpServer reads a tool's fields off
-// its schema's shape, and refining produces a ZodEffects, which has none — so a
-// refined schema publishes `{"type":"object","properties":{}}` to stdio clients
-// and leaves the model unable to see any argument at all.
+// These deliberately carry no `.refine()`. Under Zod 3, refining produced a
+// ZodEffects, which has no shape for McpServer to read a tool's fields off — so a
+// refined schema published `{"type":"object","properties":{}}` to stdio clients
+// and left the model unable to see any argument at all. Zod 4 dropped ZodEffects
+// and a refined object keeps its shape, but the rule still belongs a layer down.
 //
 // The "one of card_id or card_number" rule is not lost by dropping it here: it
 // is enforced a layer down by resolveCardNumber, which throws when neither is
@@ -458,8 +462,7 @@ export const deactivateUserSchema = z.object({
 export const getNotificationsSchema = z.object({
   account_slug: accountSlugSchema,
   // Same .min(1) reasoning as getCardsSchema.page: .positive() is an exclusive
-  // bound, which zod-to-json-schema renders as draft-04 `exclusiveMinimum: true`
-  // and makes the whole tool list unusable for strict clients.
+  // bound and publishes as `exclusiveMinimum: 0` rather than `minimum: 1`.
   page: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional().describe(
     "Page of already-read notification history to fetch (1-based). Omit (or pass 1) for the " +
     "default response: up to 100 unread notifications followed by the most recent page of read " +
@@ -653,10 +656,11 @@ export const getPinsSchema = z.object({
 
 // ============ Attachment schemas ============
 
-// Deliberately a plain object with no .refine(): McpServer.registerTool reads its
-// fields off the schema's shape, and a refined schema is a ZodEffects wrapper with
-// no shape to read — so refining this would publish `properties: {}` to stdio
-// clients and leave the model unable to see any argument.
+// Deliberately a plain object with no .refine(): under Zod 3 a refined schema was
+// a ZodEffects wrapper with no shape for McpServer.registerTool to read its fields
+// off, so refining this published `properties: {}` to stdio clients and left the
+// model unable to see any argument. Zod 4 keeps the shape, but the rule stays out
+// of the schema anyway.
 // The either/or rules below are enforced at runtime by resolveAttachment, which
 // has to own them regardless: the Cloudflare transport dispatches raw arguments
 // without Zod at all.

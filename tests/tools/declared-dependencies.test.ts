@@ -582,7 +582,6 @@ describe("declared dependencies", () => {
     expect([...imported.keys()].sort()).toEqual([
       "@modelcontextprotocol/sdk",
       "zod",
-      "zod-to-json-schema",
     ]);
   });
 
