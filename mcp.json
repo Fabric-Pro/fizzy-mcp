@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "fizzy": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "fizzy-mcp@2"
+      ],
+      "env": {
+        "FIZZY_ACCESS_TOKEN": "${FIZZY_ACCESS_TOKEN}",
+        "FIZZY_BASE_URL": "${FIZZY_BASE_URL}"
+      }
+    }
+  }
+}
