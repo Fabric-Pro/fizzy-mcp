@@ -202,6 +202,8 @@ fizzy-mcp --help
 
 ### For Cursor IDE
 
+> 💡 **Note**: The root `mcp.json` in this repository is a manifest for the Cursor Plugin marketplace. For manual setup in your local `~/.cursor/mcp.json`, substitute your actual token as shown below (do not copy the literal `${FIZZY_ACCESS_TOKEN}`).
+
 Cursor supports two connection methods: **stdio** (local process) and **HTTP** (remote server).
 
 #### Option 1: Stdio Transport (Local Process - Recommended for Personal Use)

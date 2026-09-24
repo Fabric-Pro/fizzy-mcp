@@ -1,6 +1,7 @@
 {
   "name": "fizzy-mcp",
-  "version": "2.0.0",
+  "displayName": "Fizzy",
+  "category": "integrations",
   "description": "MCP Server for Fizzy - A project management tool by Basecamp",
   "author": {
     "name": "Preetham Reddy"
@@ -15,7 +16,7 @@
   ],
   "license": "MIT",
   "repository": "https://github.com/Fabric-Pro/fizzy-mcp",
-  "logo": "assets/logo.jpg",
+  "mcpServers": "./mcp.json",
   "variables": {
     "type": "object",
     "properties": {
@@ -23,8 +24,16 @@
         "type": "string",
         "title": "Fizzy Access Token",
         "description": "Your Fizzy API access token"
+      },
+      "FIZZY_BASE_URL": {
+        "type": "string",
+        "title": "Fizzy Base URL",
+        "description": "Fizzy API base URL (default: https://app.fizzy.do)",
+        "default": "https://app.fizzy.do"
       }
     },
-    "required": ["FIZZY_ACCESS_TOKEN"]
+    "required": [
+      "FIZZY_ACCESS_TOKEN"
+    ]
   }
 }
