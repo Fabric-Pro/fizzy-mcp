@@ -583,7 +583,7 @@ function isProvenSafe(
     // Anchored to the binding's own start (rather than searched for anywhere
     // in a window) now that there is exactly one candidate to check.
     const guardPattern = new RegExp(
-      `^const\\s+${expr}\\s*=\\s*(?:assertPathSegment|this\\.normalizeSlug|normalizeAccountSlug)\\s*\\(`
+      `^const\\s+${expr}\\s*=\\s*(?:assertPathSegment|assertCardNumber|this\\.normalizeSlug|normalizeAccountSlug)\\s*\\(`
     );
     if (guardPattern.test(fromBinding)) return true;
   }
@@ -1777,6 +1777,16 @@ describe("path segment guards on FizzyClient", () => {
     const sites = findRawFetchCallSites(masked, methodStarts);
     expect(sites.length).toBe(7);
     expect(sites.filter((site) => site.isBareCall)).toHaveLength(3);
+  });
+
+  it("guards every card slot with assertCardNumber, not the bare segment guard", () => {
+    // Upstream resolves /cards/:x by number, so a card slot that only gets
+    // the containment guard lets a leading-digit id address the wrong card.
+    const masked = blankComments(source);
+    const cardSlot = /\b(assertPathSegment|assertCardNumber)\(\s*\w+\s*,\s*"card_(?:number|id)"/g;
+    const guards = [...masked.matchAll(cardSlot)].map((m) => m[1]);
+    expect(guards.length).toBe(28);
+    expect(guards.filter((g) => g === "assertPathSegment")).toEqual([]);
   });
 
   it("proves every raw fetch call is on the allowlist", () => {

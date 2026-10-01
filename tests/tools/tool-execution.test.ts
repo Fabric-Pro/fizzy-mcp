@@ -264,13 +264,13 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
     it("updateCard updates a card", async () => {
       mockFetch.mockResolvedValueOnce(mockNoContent());
 
-      await client.updateCard("123", "card1", {
+      await client.updateCard("123", "1", {
         title: "Updated Card",
         status: "archived",
       });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1",
+        "https://app.fizzy.do/123/cards/1",
         expect.objectContaining({
           method: "PUT",
           body: expect.stringContaining('"title":"Updated Card"'),
@@ -281,10 +281,10 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
     it("deleteCard deletes a card", async () => {
       mockFetch.mockResolvedValueOnce(mockNoContent());
 
-      await client.deleteCard("123", "card1");
+      await client.deleteCard("123", "1");
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1",
+        "https://app.fizzy.do/123/cards/1",
         expect.objectContaining({ method: "DELETE" })
       );
     });
