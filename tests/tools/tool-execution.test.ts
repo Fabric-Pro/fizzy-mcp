@@ -966,7 +966,7 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
       await expect(
         toolHandlers.fizzy_get_card_comments(mockClient as unknown as FizzyClient, {
           account_slug: "123",
-          card_id: "card-abc",
+          card_id: "11",
           fields: "compact",
         })
       ).rejects.toThrow(/fields must be "summary" or "full"/);

@@ -18,10 +18,11 @@
  * not — most are a 25-character base36 id, but a card path resolves by number
  * instead — so that module applies one conservative containment charset
  * instead of a shape pin, which would risk rejecting a real id and breaking
- * every tool for that resource. `cardId` in particular has no single shape to
- * pin regardless — see that module's own doc comment. This module covers the
- * value every account-scoped path starts with, which is all of them but
- * `/my/identity`.
+ * every tool for that resource. Card paths are the exception: they are pinned
+ * to digits by `assertCardNumber` in the same module, because an unpinned card
+ * slot reaches a different card rather than failing — see that module's own
+ * doc comment. This module covers the value every account-scoped path starts
+ * with, which is all of them but `/my/identity`.
  *
  * This lives in its own module because both callers are load-bearing and
  * neither owns the rule: client/fizzy-client.ts applies it to every endpoint,

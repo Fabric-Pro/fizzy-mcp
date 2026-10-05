@@ -18,13 +18,13 @@ export const boardIdSchema = z.string().describe(
 );
 
 export const cardIdSchema = z.string().describe(
-  "The unique card identifier (numeric string, e.g., '67890'). " +
-  "Get available card IDs from fizzy_get_cards."
+  "The card's number, digits only (e.g., '123'). Despite the name, this is not " +
+  "the card's 25-character id: Fizzy looks cards up by number. " +
+  "Get card numbers from the 'number' field of fizzy_get_cards."
 );
 
 export const cardNumberSchema = z.string().describe(
-  "The card number - the visible ID shown on the board (e.g., '#123'). " +
-  "This is different from card_id and is used for some endpoints. " +
+  "The card number - the visible ID shown on the board, digits only (e.g., '123'). " +
   "Card numbers are shown in the Fizzy UI and are user-friendly identifiers."
 );
 
@@ -363,14 +363,14 @@ const commentCardSelectorBase = z.object({
   card_id: cardIdSchema
     .optional()
     .describe(
-      "The unique card identifier (numeric string, e.g., '67890'). " +
+      "The card's number, digits only (e.g., '123') - not the card's 25-character id. " +
       "Provide either card_id or card_number. " +
-      "Get available card IDs from fizzy_get_cards."
+      "Get card numbers from fizzy_get_cards."
     ),
   card_number: cardNumberSchema
     .optional()
     .describe(
-      "The card number - the visible ID shown on the board (e.g., '#123'). " +
+      "The card number - the visible ID shown on the board, digits only (e.g., '123'). " +
       "Provide either card_id or card_number."
     ),
 });
