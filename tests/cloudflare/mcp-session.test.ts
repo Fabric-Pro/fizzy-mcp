@@ -545,10 +545,10 @@ describe("Card Number Resolution (shared utility)", () => {
       }),
     };
 
-    const result = await resolveCardNumber(mockClient, "/123", "card-abc", undefined);
+    const result = await resolveCardNumber(mockClient, "/123", "11", undefined);
 
     expect(result).toBe("11");
-    expect(mockClient.getCard).toHaveBeenCalledWith("/123", "card-abc");
+    expect(mockClient.getCard).toHaveBeenCalledWith("/123", "11");
   });
 
   it("should return card_number directly without API call", async () => {

@@ -27,14 +27,14 @@
  * calls `find_by!(number: params[:id])` and `Card#to_param` returns
  * `number.to_s`. Both shapes fit comfortably inside the charset below, so one
  * conservative pattern covers them without hard-coding either encoding into
- * this client. Pinning a shape instead would tie this client to whatever
- * upstream happens to use for ids today, and `card_id` in particular has no
- * single shape to pin regardless: `getCard`/`updateCard`/`deleteCard` build
- * `/cards/:id` from whatever the caller labels `card_id`, but the route on
- * the other end resolves that slot by `number`, not by id (see
- * `utils/card-resolver.ts`, which bridges exactly that gap for the tools that
- * accept either). This module takes no position on which shape belongs there;
- * it only keeps whatever value arrives inside a single, inert path segment.
+ * {@link assertPathSegment}: pinning a resource-id shape would tie this client
+ * to whatever upstream happens to use for ids today.
+ *
+ * Card slots are the one exception, and get {@link assertCardNumber} on top of
+ * the containment guard. Every `/cards/:x` slot resolves by `number` —
+ * including the one `getCard`/`updateCard`/`deleteCard` label `card_id` — and
+ * Rails casts a leading-digit id to that integer column instead of rejecting
+ * it, so an unpinned card slot reaches a different card rather than failing.
  * `config/routes.rb` places no constraint on any id segment, so upstream does
  * no shape checking of its own to fall back on.
  */

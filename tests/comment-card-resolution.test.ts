@@ -31,10 +31,10 @@ describe("resolveCardNumber utility", () => {
       }),
     };
 
-    const result = await resolveCardNumber(mockLookup, "/123", "card-abc", undefined);
+    const result = await resolveCardNumber(mockLookup, "/123", "11", undefined);
 
     expect(result).toBe("11");
-    expect(mockLookup.getCard).toHaveBeenCalledWith("/123", "card-abc");
+    expect(mockLookup.getCard).toHaveBeenCalledWith("/123", "11");
   });
 
   it("falls back to URL parsing when number is missing", async () => {
