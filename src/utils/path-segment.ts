@@ -27,14 +27,14 @@
  * calls `find_by!(number: params[:id])` and `Card#to_param` returns
  * `number.to_s`. Both shapes fit comfortably inside the charset below, so one
  * conservative pattern covers them without hard-coding either encoding into
- * this client. Pinning a shape instead would tie this client to whatever
- * upstream happens to use for ids today, and `card_id` in particular has no
- * single shape to pin regardless: `getCard`/`updateCard`/`deleteCard` build
- * `/cards/:id` from whatever the caller labels `card_id`, but the route on
- * the other end resolves that slot by `number`, not by id (see
- * `utils/card-resolver.ts`, which bridges exactly that gap for the tools that
- * accept either). This module takes no position on which shape belongs there;
- * it only keeps whatever value arrives inside a single, inert path segment.
+ * {@link assertPathSegment}: pinning a resource-id shape would tie this client
+ * to whatever upstream happens to use for ids today.
+ *
+ * Card slots are the one exception, and get {@link assertCardNumber} on top of
+ * the containment guard. Every `/cards/:x` slot resolves by `number` —
+ * including the one `getCard`/`updateCard`/`deleteCard` label `card_id` — and
+ * Rails casts a leading-digit id to that integer column instead of rejecting
+ * it, so an unpinned card slot reaches a different card rather than failing.
  * `config/routes.rb` places no constraint on any id segment, so upstream does
  * no shape checking of its own to fall back on.
  */
@@ -93,6 +93,39 @@ export function assertPathSegment(value: string, name: string): string {
     throw new Error(
       `${name} contains characters that are not part of a Fizzy identifier. ` +
         `Pass the id exactly as the Fizzy API returned it — never a path, URL, or query string.`
+    );
+  }
+
+  return value;
+}
+
+/** A card number: the plain integer shown on the board. */
+const CARD_NUMBER_PATTERN = /^\d+$/;
+
+/**
+ * Assert that `value` is a card number, and return it unchanged.
+ *
+ * Every `/cards/:x` slot is resolved upstream by `find_by!(number: ...)`, and
+ * Rails casts a string to that integer column by its leading digits. A
+ * 25-character card id therefore does not 404 when it starts with digits —
+ * and current ids do, since the base36 UUIDv7 encoding leads with the
+ * timestamp: `03…` silently reads or writes card 3, which exists in any
+ * account that kept its default onboarding cards. That is the wrong-card
+ * comment from issue #5, and it reaches `updateCard` too, where it overwrites
+ * the other card. Card slots are the one place where leaving the shape
+ * unpinned (see the note above) misroutes a request instead of failing it.
+ *
+ * @throws Error under every condition {@link assertPathSegment} throws, or if
+ *   `value` is anything but ASCII digits.
+ */
+export function assertCardNumber(value: string, name: string): string {
+  assertPathSegment(value, name);
+
+  if (!CARD_NUMBER_PATTERN.test(value)) {
+    throw new Error(
+      `${name} must be the card's number as shown on the board (e.g. 42), not its id. ` +
+        `Fizzy looks cards up by number, so an id would address a different card. ` +
+        `Use the "number" field from fizzy_get_cards.`
     );
   }
 

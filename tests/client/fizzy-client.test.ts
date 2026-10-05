@@ -254,6 +254,20 @@ describe("FizzyClient", () => {
       await expect(client.removeReaction("123456", "1", "1", id)).rejects.toThrow(/reaction_id/);
       expect(mockFetch).not.toHaveBeenCalled();
     });
+
+    it("rejects a card id in a card slot without issuing a request", async () => {
+      // Fabricated id. Upstream resolves every /cards/:x slot by number, so an
+      // id that starts with digits reads or writes a different card (this one
+      // would be card 3) instead of failing.
+      const id = "03abcdefghijklmnopqrstuvw";
+      await expect(client.getCard("123456", id)).rejects.toThrow(/card_id/);
+      await expect(client.updateCard("123456", id, { title: "x" })).rejects.toThrow(/card_id/);
+      await expect(client.closeCard("123456", id)).rejects.toThrow(/card_number/);
+      await expect(
+        client.createCardComment("123456", id, { body: "x" })
+      ).rejects.toThrow(/card_number/);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
   });
 
   describe("authentication", () => {
@@ -511,10 +525,10 @@ describe("FizzyClient", () => {
         json: async () => mockCard,
       });
 
-      const result = await client.getCard("123", "card1");
+      const result = await client.getCard("123", "1");
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1",
+        "https://app.fizzy.do/123/cards/1",
         expect.any(Object)
       );
       expect(result).toEqual(mockCard);
@@ -552,10 +566,10 @@ describe("FizzyClient", () => {
         status: 204,
       });
 
-      await client.updateCard("123", "card1", { title: "Updated Card" });
+      await client.updateCard("123", "1", { title: "Updated Card" });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1",
+        "https://app.fizzy.do/123/cards/1",
         expect.objectContaining({
           method: "PUT",
         })
@@ -568,10 +582,10 @@ describe("FizzyClient", () => {
         status: 204,
       });
 
-      await client.deleteCard("123", "card1");
+      await client.deleteCard("123", "1");
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1",
+        "https://app.fizzy.do/123/cards/1",
         expect.objectContaining({
           method: "DELETE",
         })

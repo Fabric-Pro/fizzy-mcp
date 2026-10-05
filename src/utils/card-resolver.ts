@@ -4,11 +4,11 @@
  * Shared logic for resolving card_id to card_number.
  * Used by both the standard server and Cloudflare Durable Objects paths.
  *
- * The Fizzy API has inconsistent identifier requirements:
- * - Card CRUD operations use `card_id` (internal identifier)
- * - Comment/step/action operations use `card_number` (visible number like #11)
- *
- * This utility bridges that gap by accepting either identifier.
+ * Despite the two names, both carry the card's number: every `/cards/:x`
+ * endpoint upstream looks a card up by `number`, never by its 25-character id,
+ * and `FizzyClient` rejects anything but digits in those slots (see
+ * `assertCardNumber` in `utils/path-segment.ts`). The tools accept either name
+ * because they grew both over time, and a model may send whichever it saw last.
  */
 
 /**
@@ -27,8 +27,8 @@ export interface CardLookup {
  *
  * @param lookup - Object with getCard method (e.g., FizzyClient)
  * @param accountSlug - The account slug
- * @param cardId - The internal card ID (optional if cardNumber provided)
- * @param cardNumber - The visible card number (optional if cardId provided)
+ * @param cardId - The card's number, passed as `card_id` (optional if cardNumber provided)
+ * @param cardNumber - The card's number (optional if cardId provided)
  * @returns The resolved card number as a string
  * @throws Error if neither identifier provided or resolution fails
  *
@@ -37,8 +37,8 @@ export interface CardLookup {
  * const num = await resolveCardNumber(client, "/123", undefined, "15");
  *
  * @example
- * // Resolving card_id to card_number (fetches card)
- * const num = await resolveCardNumber(client, "/123", "card-abc", undefined);
+ * // Resolving card_id (fetches the card, which confirms it exists)
+ * const num = await resolveCardNumber(client, "/123", "15", undefined);
  */
 export async function resolveCardNumber(
   lookup: CardLookup,

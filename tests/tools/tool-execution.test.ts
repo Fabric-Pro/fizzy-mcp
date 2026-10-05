@@ -264,13 +264,13 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
     it("updateCard updates a card", async () => {
       mockFetch.mockResolvedValueOnce(mockNoContent());
 
-      await client.updateCard("123", "card1", {
+      await client.updateCard("123", "1", {
         title: "Updated Card",
         status: "archived",
       });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1",
+        "https://app.fizzy.do/123/cards/1",
         expect.objectContaining({
           method: "PUT",
           body: expect.stringContaining('"title":"Updated Card"'),
@@ -281,10 +281,10 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
     it("deleteCard deletes a card", async () => {
       mockFetch.mockResolvedValueOnce(mockNoContent());
 
-      await client.deleteCard("123", "card1");
+      await client.deleteCard("123", "1");
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://app.fizzy.do/123/cards/card1",
+        "https://app.fizzy.do/123/cards/1",
         expect.objectContaining({ method: "DELETE" })
       );
     });
@@ -966,7 +966,7 @@ describe("Tool Execution Tests (via FizzyClient)", () => {
       await expect(
         toolHandlers.fizzy_get_card_comments(mockClient as unknown as FizzyClient, {
           account_slug: "123",
-          card_id: "card-abc",
+          card_id: "11",
           fields: "compact",
         })
       ).rejects.toThrow(/fields must be "summary" or "full"/);

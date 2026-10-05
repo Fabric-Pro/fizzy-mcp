@@ -268,6 +268,27 @@ const EXEMPT_NAMES = new Set([
   "requestedPage",
 ]);
 
+/**
+ * A single- or double-quoted string literal, escape-aware: `\"` inside the
+ * label does not close it, so a label cannot smuggle a `);` past the end of
+ * the guard call.
+ */
+const STRING_LITERAL = String.raw`(?:"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')`;
+
+/**
+ * A guard's argument list: one identifier, optionally a string-literal label
+ * and a trailing comma, and nothing after the call but the statement's `;`.
+ * Every guard binding in fizzy-client.ts has this shape (the sweeps below fail
+ * if one does not), and requiring it is what stops `guard(x) + "/../999"`
+ * passing as guarded.
+ */
+const GUARD_ARGS = String.raw`\(\s*[A-Za-z_$][\w$]*\s*(?:,\s*${STRING_LITERAL}\s*)?(?:,\s*)?\)\s*;`;
+
+/** A call to any guard that proves an interpolated name safe. */
+const GUARD_CALL =
+  String.raw`(?:assertPathSegment|assertCardNumber|this\.normalizeSlug|normalizeAccountSlug)\s*` +
+  GUARD_ARGS;
+
 /** The three methods a request path can reach the network through. */
 const REQUEST_METHOD_NAMES = ["requestAllPages", "requestWithMeta", "request"] as const;
 type RequestMethodName = (typeof REQUEST_METHOD_NAMES)[number];
@@ -581,9 +602,12 @@ function isProvenSafe(
     const fromBinding = masked.slice(binding.index, boundary);
     // `const` only — see "let is never a guard" in the module doc comment.
     // Anchored to the binding's own start (rather than searched for anywhere
-    // in a window) now that there is exactly one candidate to check.
+    // in a window) now that there is exactly one candidate to check. The
+    // whole initializer must be the bare guard call, through its `;`: a
+    // prefix match would also accept `guard(x) + "/../999"`, which keeps the
+    // guard's name while undoing what it checked.
     const guardPattern = new RegExp(
-      `^const\\s+${expr}\\s*=\\s*(?:assertPathSegment|this\\.normalizeSlug|normalizeAccountSlug)\\s*\\(`
+      `^const\\s+${expr}\\s*=\\s*${GUARD_CALL}`
     );
     if (guardPattern.test(fromBinding)) return true;
   }
@@ -1254,6 +1278,40 @@ describe("template scanner", () => {
     expect(findTemplateViolations(source)).toEqual([]);
   });
 
+  it("rejects a guard call whose result is then extended", () => {
+    // The binding still starts with the guard, but the dot segments it appends
+    // are resolved away by fetch: a valid "11" would request card 999 instead.
+    const source = wrap(`
+  async getCard(accountSlug: string, cardId: string) {
+    const slug = this.normalizeSlug(accountSlug);
+    const card = assertCardNumber(cardId, "card_id") + "/../999";
+    return this.request("GET", \`/\${slug}/cards/\${card}\`);
+  }`);
+    expect(findTemplateViolations(source).map((v) => v.expr)).toEqual(["card"]);
+  });
+
+  it("rejects an extended guard call hidden behind an escaped quote in its label", () => {
+    // `\"` does not close the label, so the `);` after it is still inside the
+    // string and the real call ends at the second `)`, followed by `+`.
+    const source = wrap(`
+  async getCard(accountSlug: string, cardId: string) {
+    const slug = this.normalizeSlug(accountSlug);
+    const card = assertCardNumber(cardId, "card_id\\");") + "/../999";
+    return this.request("GET", \`/\${slug}/cards/\${card}\`);
+  }`);
+    expect(findTemplateViolations(source).map((v) => v.expr)).toEqual(["card"]);
+  });
+
+  it("accepts a single-quoted label and a trailing comma", () => {
+    const source = wrap(`
+  async getCard(accountSlug: string, cardId: string) {
+    const slug = this.normalizeSlug(accountSlug,);
+    const card = assertCardNumber(cardId, 'card_id',);
+    return this.request("GET", \`/\${slug}/cards/\${card}\`);
+  }`);
+    expect(findTemplateViolations(source)).toEqual([]);
+  });
+
   it("rejects a value interpolated with no local guard at all", () => {
     const source = wrap(`
   async getBoard(accountSlug: string, boardId: string) {
@@ -1777,6 +1835,47 @@ describe("path segment guards on FizzyClient", () => {
     const sites = findRawFetchCallSites(masked, methodStarts);
     expect(sites.length).toBe(7);
     expect(sites.filter((site) => site.isBareCall)).toHaveLength(3);
+  });
+
+  it("guards every /cards/:x slot with assertCardNumber, not the bare segment guard", () => {
+    // Upstream resolves /cards/:x by number, so a card slot that only gets
+    // the containment guard lets a leading-digit id address the wrong card.
+    // Keyed on the path template itself rather than on the guard's argument
+    // name, so a card method is held to this whatever it labels its argument.
+    const masked = blankComments(source);
+    const methodStarts = findMethodStarts(masked, classBodyStartOf(masked));
+    let cardSlots = 0;
+    const unpinned: string[] = [];
+    for (const template of findPathTemplates(masked)) {
+      for (const slot of template.raw.matchAll(/\/cards\/\$\{([^}]*)\}/g)) {
+        cardSlots++;
+        const expr = slot[1].trim();
+        const method = findEnclosingMethod(methodStarts, template.index);
+        const binding =
+          method && /^[A-Za-z_$][\w$]*$/.test(expr)
+            ? findSoleConstBinding(
+                masked,
+                method,
+                methodExtentEnd(methodStarts, method, masked.length),
+                expr
+              )
+            : null;
+        const pinned =
+          binding !== null &&
+          binding.depth === 1 &&
+          binding.index < template.index &&
+          new RegExp(`^const\\s+${expr}\\s*=\\s*assertCardNumber\\s*${GUARD_ARGS}`).test(
+            masked.slice(binding.index)
+          );
+        if (!pinned) {
+          unpinned.push(`line ${template.line} (${method?.name ?? "?"}): \${${expr}}`);
+        }
+      }
+    }
+    // 28 is every /cards/:x template in the client; pinned so a scanner that
+    // stopped matching them fails here instead of passing vacuously.
+    expect(cardSlots).toBe(28);
+    expect(unpinned).toEqual([]);
   });
 
   it("proves every raw fetch call is on the allowlist", () => {
