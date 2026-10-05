@@ -8,12 +8,8 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import {
-  createHTTPTransportServer,
-  MAX_HTTP_REQUEST_BODY_BYTES,
-  type HTTPTransportServer,
-} from "../../src/transports/http.js";
-import { MAX_ATTACHMENT_BYTES } from "../../src/utils/attachments.js";
+import { createHTTPTransportServer, type HTTPTransportServer } from "../../src/transports/http.js";
+import { MAX_ATTACHMENT_BYTES, MAX_REQUEST_BODY_BYTES } from "../../src/utils/attachments.js";
 
 const TOKEN = "test-fizzy-token";
 
@@ -127,7 +123,7 @@ describe("HTTP transport request-body limit", () => {
 
     // Well past the SDK's 4 MiB default, inside our ceiling.
     expect(Buffer.byteLength(body)).toBeGreaterThan(4 * 1024 * 1024);
-    expect(Buffer.byteLength(body)).toBeLessThanOrEqual(MAX_HTTP_REQUEST_BODY_BYTES);
+    expect(Buffer.byteLength(body)).toBeLessThanOrEqual(MAX_REQUEST_BODY_BYTES);
 
     const res = await post(port, body, { "mcp-session-id": sessionId, "mcp-protocol-version": "2025-06-18" });
     expect(res.status).toBe(200);
@@ -139,7 +135,7 @@ describe("HTTP transport request-body limit", () => {
   it("rejects a declared body over the ceiling with 413", async () => {
     // The transport refuses on Content-Length alone, so only headers are sent.
     const body = JSON.stringify({ jsonrpc: "2.0", id: 3, method: "ping", params: { pad: "" } });
-    const oversized = body.replace('"pad":""', `"pad":"${"a".repeat(MAX_HTTP_REQUEST_BODY_BYTES)}"`);
+    const oversized = body.replace('"pad":""', `"pad":"${"a".repeat(MAX_REQUEST_BODY_BYTES)}"`);
 
     const res = await post(
       port,

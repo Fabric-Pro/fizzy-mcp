@@ -41,6 +41,7 @@ import {
 } from "../tools/json-schema.js";
 import { executeToolHandler, toMcpContent } from "../tools/handlers.js";
 import { CLIENT_AUTH_HEADER } from "../utils/client-auth.js";
+import { parseJsonBody } from "./request-body.js";
 
 /**
  * Session timeout in milliseconds (30 minutes)
@@ -174,12 +175,11 @@ export class McpSessionDO extends DurableObject<Env> {
       return this.jsonError(400, -32700, "Invalid content type");
     }
 
-    let message: JsonRpcMessage;
-    try {
-      message = await request.json() as JsonRpcMessage;
-    } catch {
-      return this.jsonError(400, -32700, "Parse error");
+    const body = await parseJsonBody(request);
+    if (!body.ok) {
+      return this.jsonError(body.status, body.code, body.message);
     }
+    const message = body.message as JsonRpcMessage;
 
     if ("method" in message) {
       const response = await this.handleJsonRpcRequest(message as JsonRpcRequest);

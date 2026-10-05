@@ -22,8 +22,7 @@ import { FizzyClient } from "../client/fizzy-client.js";
 import { createFizzyServer } from "../server.js";
 import { logger } from "../utils/logger.js";
 import { SessionManager } from "../utils/session-manager.js";
-import { MAX_ATTACHMENT_BYTES } from "../utils/attachments.js";
-import { maxEncodedLength } from "../utils/base64.js";
+import { MAX_REQUEST_BODY_BYTES } from "../utils/attachments.js";
 import {
   SecurityOptions,
   validateRequestSecurity,
@@ -32,24 +31,6 @@ import {
   getBindAddress,
   extractFizzyToken,
 } from "../utils/security.js";
-
-/**
- * Request-body ceiling for the Streamable HTTP transport.
- *
- * The SDK's own default (4 MiB since 1.30.1) is below a maximum-size
- * `fizzy_upload_file` call. This ceiling fits `MAX_ATTACHMENT_BYTES` of Base64
- * plus the full whitespace slack `maxEncodedLength` allows, counted at two
- * bytes per character: the JSON-escaped cost of the newline, CR and tab that
- * line-wrapping encoders emit. Rarer whitespace the decoder also tolerates
- * (vertical tab, Unicode spaces) escapes to more and can be refused with 413.
- * The 64 KiB on top is a practical allowance for the JSON-RPC envelope and the
- * other arguments, not a bound on them. The upload handler still enforces its
- * own limit on the decoded bytes.
- */
-export const MAX_HTTP_REQUEST_BODY_BYTES =
-  2 * maxEncodedLength(MAX_ATTACHMENT_BYTES) -
-  Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4 +
-  64 * 1024;
 
 export interface HTTPSession {
   transport: StreamableHTTPServerTransport;
@@ -175,7 +156,7 @@ export function createHTTPRequestHandler(
 
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => crypto.randomUUID(),
-            maxRequestBodySize: MAX_HTTP_REQUEST_BODY_BYTES,
+            maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
             onsessioninitialized: (newSessionId) => {
               log.info(`HTTP session created: ${newSessionId}`);
               sessionManager.create(newSessionId, {
