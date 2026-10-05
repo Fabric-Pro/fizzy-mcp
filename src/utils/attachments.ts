@@ -31,6 +31,25 @@ import { getLocalFileReader } from "./file-source.js";
  */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
+/**
+ * Request-body ceiling for the HTTP entry points: the Streamable HTTP transport
+ * and the Cloudflare worker.
+ *
+ * The SDK's own default (4 MiB since 1.30.1) is below a maximum-size
+ * `fizzy_upload_file` call. This ceiling fits `MAX_ATTACHMENT_BYTES` of Base64
+ * plus the full whitespace slack `maxEncodedLength` allows, counted at two
+ * bytes per character: the JSON-escaped cost of the newline, CR and tab that
+ * line-wrapping encoders emit. Rarer whitespace the decoder also tolerates
+ * (vertical tab, Unicode spaces) escapes to more and can be refused with 413.
+ * The 64 KiB on top is a practical allowance for the JSON-RPC envelope and the
+ * other arguments, not a bound on them. The upload handler still enforces its
+ * own limit on the decoded bytes.
+ */
+export const MAX_REQUEST_BODY_BYTES =
+  2 * maxEncodedLength(MAX_ATTACHMENT_BYTES) -
+  Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4 +
+  64 * 1024;
+
 /** Extensions worth naming; anything else uploads as a generic download. */
 const CONTENT_TYPES_BY_EXTENSION: Record<string, string> = {
   png: "image/png",
