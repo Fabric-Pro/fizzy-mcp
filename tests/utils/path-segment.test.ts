@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { assertPathSegment } from "../../src/utils/path-segment.js";
+import { assertCardNumber, assertPathSegment } from "../../src/utils/path-segment.js";
 
 describe("assertPathSegment", () => {
   it("returns a bare value unchanged", () => {
@@ -110,6 +110,42 @@ describe("assertPathSegment", () => {
       const message = error instanceof Error ? error.message : String(error);
       expect(message).not.toContain(secret);
       expect(message).not.toContain("evil.example");
+    }
+  });
+});
+
+describe("assertCardNumber", () => {
+  it("returns a card number unchanged", () => {
+    expect(assertCardNumber("42", "card_number")).toBe("42");
+  });
+
+  it("rejects a 25-character card id", () => {
+    // Fabricated. Upstream resolves the card slot with find_by!(number:), and
+    // Rails casts a leading-digit string to that integer: this id would
+    // silently address card 3, not fail.
+    const id = "03abcdefghijklmnopqrstuvw";
+    expect(() => assertCardNumber(id, "card_number")).toThrow(/card_number.*number/);
+  });
+
+  it.each([["a leading-digit value", "12abc"], ["a decimal", "1.5"], ["a negative", "-1"]])(
+    "rejects %s",
+    (_label, value) => {
+      expect(() => assertCardNumber(value, "card_id")).toThrow(/card_id/);
+    }
+  );
+
+  it("still applies the path-segment guard", () => {
+    expect(() => assertCardNumber("..", "card_number")).toThrow(/path segment/);
+  });
+
+  it("does not leak the rejected value back to the caller", () => {
+    const id = "03abcdefghijklmnopqrstuvw";
+    try {
+      assertCardNumber(id, "card_number");
+      throw new Error("expected assertCardNumber to throw");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).not.toContain(id);
     }
   });
 });
