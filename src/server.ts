@@ -30,13 +30,33 @@ function formatMcpResponse(result: unknown): {
 }
 
 /**
+ * Most array elements plus object members one `tools/call` may carry.
+ *
+ * The SDK counts them before zod validation and stops counting at this cap, so
+ * an oversized payload is refused cheaply instead of being walked in full; the
+ * request body cap alone would let one carry millions of elements.
+ *
+ * The cap is a judgement, not an upstream limit. The only arrays in the tool
+ * schemas are unbounded ID lists (`assignee_ids`, `tag_ids`), and
+ * fizzy_get_cards sends those in the query string, so 10,000 of them would
+ * already make a URL of several hundred kilobytes. A long text or base64 field
+ * is a single string and counts once.
+ *
+ * Covers stdio, HTTP and SSE. The Cloudflare worker does not use McpServer.
+ */
+export const MAX_TOOL_INPUT_ELEMENTS = 10_000;
+
+/**
  * Create the Fizzy MCP Server with all tools registered
  */
 export function createFizzyServer(client: FizzyClient): McpServer {
-  const server = new McpServer({
-    name: "fizzy-mcp",
-    version: "1.1.0",
-  });
+  const server = new McpServer(
+    {
+      name: "fizzy-mcp",
+      version: "1.1.0",
+    },
+    { maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS }
+  );
 
   // Register all tools using shared handlers
   for (const toolDef of ALL_TOOLS) {
