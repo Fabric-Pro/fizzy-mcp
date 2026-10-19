@@ -180,6 +180,10 @@ describe("HTTP Multi-User Authentication", () => {
 
     expect(sessionId).toBeDefined();
 
+    // The mocked transport registers the session on a timer that can fire after the
+    // response arrives; without this wait the next request can see an unknown session.
+    await vi.waitFor(() => expect(server.sessionManager.get(sessionId!)).toBeDefined());
+
     // Try to use the session with a different token
     const response = await new Promise<http.IncomingMessage>((resolve) => {
       const req = http.request(
