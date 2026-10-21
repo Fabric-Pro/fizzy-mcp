@@ -41,10 +41,20 @@ const ACCOUNT_SLUG_PATTERN = /^[A-Za-z0-9._-]+$/;
  * slugs like `/123456`, and callers pass those straight back), then rejects
  * anything that is not a bare segment.
  *
- * @throws if the slug is empty, is `.` or `..`, or contains anything outside
- *   `[A-Za-z0-9._-]`.
+ * @throws if the slug is missing or not a string, is empty, is `.` or `..`, or
+ *   contains anything outside `[A-Za-z0-9._-]`.
  */
 export function normalizeAccountSlug(value: string): string {
+  // `value` is typed `string`, but the Cloudflare transport dispatches raw MCP
+  // arguments with no Zod validation (`cloudflare/mcp-session.ts`), so a call
+  // that omits account_slug hands this `undefined`. Checked before `.startsWith`,
+  // which would otherwise throw a bare "Cannot read properties of undefined"
+  // naming neither the tool nor the argument — the same guard, for the same
+  // reason, as `assertPathSegment` in `utils/path-segment.ts`.
+  if (typeof value !== "string") {
+    throw new Error("account_slug is required and must be an account slug");
+  }
+
   const slug = value.startsWith("/") ? value.slice(1) : value;
 
   // `.` and `..` are caught before the charset test, which would accept both:
