@@ -36,6 +36,17 @@ describe("normalizeAccountSlug", () => {
     expect(() => normalizeAccountSlug(value)).toThrow(/required and must be an account slug/);
   });
 
+  // The Cloudflare transport skips Zod, so these arrive despite the `string` type.
+  it.each([
+    ["a missing slug", undefined],
+    ["null", null],
+    ["a number", 123456],
+  ])("rejects %s as required rather than throwing a TypeError", (_label, value) => {
+    expect(() => normalizeAccountSlug(value as unknown as string)).toThrow(
+      "account_slug is required and must be an account slug"
+    );
+  });
+
   it.each([
     ["extra path segments", "123456/cards"],
     ["an embedded traversal", "123456/../999999"],
