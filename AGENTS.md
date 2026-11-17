@@ -3,7 +3,7 @@
 
 ## Project Overview
 
-fizzy-mcp is an MCP (Model Context Protocol) server for the Fizzy project management tool. It exposes 40+ tools for managing boards, cards, columns, steps, comments, reactions, tags, and notifications.
+fizzy-mcp is an MCP (Model Context Protocol) server for the Fizzy project management tool. It exposes 55 tools for managing boards, cards, columns, steps, comments, reactions, tags, and notifications.
 
 ## Tech Stack
 
@@ -101,3 +101,10 @@ npm run start:http    # Streamable HTTP transport (port 3000)
 ## Testing
 
 Tests live in `/tests` mirroring the `src/` structure. Use `vitest` globals (no imports needed for `describe`/`it`/`expect`). Integration tests in `tests/integration/` hit the real API and are excluded from the default test run.
+
+## Attachment downloads
+
+`fizzy_download_attachment` saves any attachment type locally on stdio. The Node-only
+`src/local-file-writer.ts` implements `createLocalFileWriter`; `src/utils/file-source.ts`
+exposes its injected capability. `FIZZY_MAX_DOWNLOAD_BYTES` defaults to 104857600;
+the writer configuration defaults to a five-minute body timeout.

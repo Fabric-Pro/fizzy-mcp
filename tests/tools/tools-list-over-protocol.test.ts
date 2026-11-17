@@ -47,6 +47,7 @@ describe("tools/list over a real MCP connection", () => {
   it("serves the full parameter list for the two tools that regressed", async () => {
     const published = await listToolsOverProtocol();
 
+    expect(published.get("fizzy_download_attachment")).toEqual(["account_slug", "signed_id", "filename", "variation", "directory"]);
     expect(published.get("fizzy_create_comment")).toEqual([
       "account_slug",
       "card_id",

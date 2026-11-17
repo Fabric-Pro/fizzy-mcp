@@ -282,7 +282,7 @@ export class CloudflareLogger {
         // truncated prefix is content, not metadata — but the length is safe
         // and useful for debugging.
         sanitized[key] = typeof value === "string" ? `[redacted: ${value.length} chars]` : "[REDACTED]";
-      } else if (lowerKey === "file_path") {
+      } else if (lowerKey === "file_path" || lowerKey === "directory") {
         // A local filesystem path is sensitive metadata about the caller's machine.
         sanitized[key] = "[REDACTED]";
       } else if (sensitiveKeys.some(k => lowerKey.includes(k))) {

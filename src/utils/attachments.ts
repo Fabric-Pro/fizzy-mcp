@@ -332,7 +332,7 @@ function validateAttachmentFilename(value: string): string {
 }
 
 /**
- * Resolve the arguments of `fizzy_get_attachment` into a validated request.
+ * Resolve attachment tool arguments into a validated request.
  *
  * **The tool never accepts a URL.** A caller-supplied URL fetched with the
  * user's Fizzy token attached is a server-side request forgery with a
@@ -346,12 +346,13 @@ function validateAttachmentFilename(value: string): string {
  * verbatim to the model, so they have to say what to send instead.
  */
 export function parseAttachmentRequest(
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  toolName = "fizzy_get_attachment"
 ): AttachmentRequest {
   const supplied = URL_SHAPED_ARGUMENTS.filter((key) => args[key] !== undefined);
   if (supplied.length > 0) {
     throw new Error(
-      `fizzy_get_attachment does not take a URL (${supplied.join(", ")}). ` +
+      `${toolName} does not take a URL (${supplied.join(", ")}). ` +
         `Pass the attachment's 'signed_id' and 'filename' — from fizzy_get_card or ` +
         `fizzy_get_card_comments with include_attachments=true — and the address is ` +
         `rebuilt server-side.`

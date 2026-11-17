@@ -8,6 +8,7 @@
  * for wrapping it in the appropriate MCP response format.
  */
 
+import { getLocalFileWriter } from "../utils/file-source.js";
 import type { FizzyClient } from "../client/fizzy-client.js";
 import {
   COLUMN_COLORS,
@@ -1384,6 +1385,35 @@ export const toolHandlers: Record<string, ToolHandler> = {
     };
   },
 
+  // Stdio-only via the injected writer; uses the same redirect walk as attachment reads.
+  fizzy_download_attachment: async (client, args) => {
+    const writer = getLocalFileWriter();
+    if (!writer) {
+      throw new Error("fizzy_download_attachment is only supported on the stdio transport: the server's disk is not the caller's");
+    }
+    const { accountSlug, ...ref } = parseAttachmentRequest(args, "fizzy_download_attachment");
+    let saved: { path: string; byteSize: number } | undefined;
+    let contentType = "application/octet-stream";
+    try {
+      await client.fetchAttachment(accountSlug, ref, {
+        maxBytes: writer.maxBytes,
+        bodyTimeoutMs: writer.bodyTimeoutMs,
+        sink: async (body, type) => {
+          contentType = type || contentType;
+          saved = await writer.write(body, ref.filename, args.directory);
+        },
+      });
+    } catch (error) {
+      if (error instanceof FizzyAttachmentTooLargeError && ref.variation === undefined) {
+        throw new Error(`${error.message}. Re-request it with the attachment's 'preview_variation' as 'variation' to fetch the resized preview instead.`);
+      }
+      throw error;
+    }
+    if (!saved) throw new Error("Attachment download did not produce a file");
+    return { path: saved.path, filename: ref.filename, content_type: contentType,
+      byte_size: saved.byteSize, variant: ref.variation ? "preview" : "original" };
+  },
+
   // Reads an attachment back so the model can look at it. The security
   // properties this depends on live one layer down, deliberately:
   // parseAttachmentRequest refuses a caller-supplied URL and pins every token to
@@ -1425,7 +1455,8 @@ export const toolHandlers: Record<string, ToolHandler> = {
         renderable: false,
         note:
           `This attachment is ${contentType}, which cannot be shown as an image, so its ` +
-          `bytes were not downloaded. Open the attachment's 'url' in a browser to view it.`,
+          `bytes were not downloaded. Open the attachment's 'url' in a browser to view it. ` +
+          `On the stdio transport, fizzy_download_attachment can save the file locally.`,
       };
     }
 

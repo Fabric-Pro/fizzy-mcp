@@ -1907,6 +1907,7 @@ export class FizzyClient {
     const baseOrigin = this.originOfBaseUrl();
     let url = `${this.baseUrl}${this.attachmentPath(slug, ref)}`;
 
+    let timeoutMs = this.timeout;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
@@ -1964,6 +1965,24 @@ export class FizzyClient {
         const declared = Number(response.headers?.get?.("Content-Length") ?? Number.NaN);
         const byteSize = Number.isSafeInteger(declared) && declared >= 0 ? declared : undefined;
 
+        if (options.sink) {
+          if (byteSize !== undefined && byteSize > options.maxBytes) {
+            await response.body?.cancel().catch(() => {});
+            throw new FizzyAttachmentTooLargeError(`${ref.filename} is ${byteSize} bytes, over the ${options.maxBytes}-byte limit for a download`, options.maxBytes, byteSize);
+          }
+          clearTimeout(timeoutId);
+          const bodyTimeoutMs = options.bodyTimeoutMs ?? 300000;
+          timeoutMs = bodyTimeoutMs;
+          const bodyTimer = setTimeout(() => controller.abort(), bodyTimeoutMs);
+          try {
+            const body = response.body ?? new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } });
+            await options.sink(body, contentType, byteSize);
+            return { contentType, byteSize };
+          } finally {
+            clearTimeout(bodyTimer);
+          }
+        }
+
         if (options.shouldReadBody && !options.shouldReadBody(contentType)) {
           // Nothing here wants the bytes, so don't pay for them.
           await response.body?.cancel?.().catch(() => {});
@@ -1980,8 +1999,8 @@ export class FizzyClient {
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         throw new FizzyTimeoutError(
-          `Attachment fetch timed out after ${this.timeout}ms`,
-          this.timeout
+          `Attachment fetch timed out after ${timeoutMs}ms`,
+          timeoutMs
         );
       }
       if (error instanceof TypeError && error.message.includes("fetch")) {

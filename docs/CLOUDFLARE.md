@@ -388,7 +388,7 @@ npx @modelcontextprotocol/inspector
 
 **4. Test the connection:**
 - Click **Connect**
-- You should see the list of 47 available tools
+- You should see the list of 55 available tools
 - Try calling tools like `fizzy_get_identity` or `fizzy_get_boards`
 
 **Note**: MCP Inspector only supports HTTP transport. SSE transport is not available on Cloudflare Workers.

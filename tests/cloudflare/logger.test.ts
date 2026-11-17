@@ -45,6 +45,10 @@ describe("CloudflareLogger.logToolInvocation sanitization", () => {
     expect(sanitized.base64_data).toBe("[REDACTED]");
   });
 
+  it("redacts directory regardless of case", () => {
+    expect(loggedArgs({ directory: "/synthetic/downloads", DIRECTORY: "/synthetic/private" })).toEqual({ directory: "[REDACTED]", DIRECTORY: "[REDACTED]" });
+  });
+
   it("redacts file_path outright", () => {
     const sanitized = loggedArgs({ file_path: "/Users/alice/secret-plans.pdf" });
     expect(sanitized.file_path).toBe("[REDACTED]");
