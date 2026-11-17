@@ -134,6 +134,8 @@ Configure in `wrangler.jsonc`:
 |----------|----------|---------|-------------|
 | `FIZZY_BASE_URL` | No | `https://app.fizzy.do` | Fizzy API base URL |
 | `MCP_ALLOWED_ORIGINS` | No | `*` | Allowed CORS origins (comma-separated) |
+| `FIZZY_MAX_INLINE_TEXT_BYTES` | No | `1048576` | Inline text cap in bytes (positive decimal integer, at most 10485760). |
+| `FIZZY_MAX_INLINE_BINARY_BYTES` | No | `524288` | Inline binary cap in bytes (positive decimal integer, at most 10485760). |
 | `LOG_LEVEL` | No | `info` | Logging level (debug, info, warn, error) |
 | `RATE_LIMIT_RPM` | No | `100` | Requests per minute per user |
 | `ENABLE_RATE_LIMIT` | No | `true` | Enable/disable rate limiting |
@@ -457,6 +459,21 @@ wrangler secret put MCP_AUTH_TOKEN
 > mode consumes the header the per-user Fizzy token needs, so do not use it for
 > new deployments.
 
+### Inline Attachment Limits
+
+Configure `FIZZY_MAX_INLINE_TEXT_BYTES` (default 1048576) and
+`FIZZY_MAX_INLINE_BINARY_BYTES` (default 524288) in `wrangler.jsonc` vars.
+Each value must contain decimal digits and represent a positive safe integer no
+larger than 10485760. An invalid value makes only `include_content=true` calls
+fail with an error naming the variable; it does not prevent deployment.
+
+```jsonc
+"vars": {
+  "FIZZY_MAX_INLINE_TEXT_BYTES": "1048576",
+  "FIZZY_MAX_INLINE_BINARY_BYTES": "524288"
+}
+```
+
 ### CORS Configuration
 
 Restrict which origins can connect:
@@ -637,6 +654,13 @@ Or set to `*` for development (not recommended for production):
   "MCP_ALLOWED_ORIGINS": "*"
 }
 ```
+
+### Inline Attachment Configuration Errors
+
+If an `include_content=true` call names `FIZZY_MAX_INLINE_TEXT_BYTES` or
+`FIZZY_MAX_INLINE_BINARY_BYTES`, check the corresponding vars value against the
+limits above. Other calls can continue; correcting the value requires updating
+the Worker configuration through your normal deployment process.
 
 ### Session Errors
 

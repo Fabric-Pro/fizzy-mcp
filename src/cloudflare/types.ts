@@ -22,6 +22,8 @@ import type {
  * - This enables multi-tenant deployments where each user has their own Fizzy account
  */
 export interface Env {
+  FIZZY_MAX_INLINE_TEXT_BYTES?: string;
+  FIZZY_MAX_INLINE_BINARY_BYTES?: string;
   // === Optional Environment Variables ===
   /**
    * Fizzy API base URL

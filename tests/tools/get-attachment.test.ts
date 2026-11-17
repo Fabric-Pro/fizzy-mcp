@@ -353,3 +353,108 @@ describe("toMcpContent", () => {
     ]);
   });
 });
+
+describe("opt-in content", () => {
+  it.each([undefined, false])("preserves metadata for %s", async (include_content) => {
+    for (const contentType of ["application/pdf", "text/plain"]) {
+      const result = await getAttachment(mockClient({ contentType, byteSize: 4 }), { ...VALID_ARGS, account_slug: "123456", include_content });
+      expect(result).toEqual({ filename: VALID_ARGS.filename, content_type: contentType, byte_size: 4, variant: "original", renderable: false,
+        note: `This attachment is ${contentType}, which cannot be shown as an image, so its bytes were not downloaded. Open the attachment's 'url' in a browser to view it. On the stdio transport, fizzy_download_attachment can save the file locally.` });
+      expect(fetchCalls.at(-1)!.options.shouldReadBody!(contentType)).toBe(false);
+    }
+  });
+  it.each(["text/plain; charset=utf-8", "application/vnd.x+json", "APPLICATION/XML"])("embeds %s", async (contentType) => {
+    const result = await getAttachment(mockClient({ contentType, bytes: new TextEncoder().encode("example"), byteSize: 7 }), { ...VALID_ARGS, account_slug: "123456", include_content: true });
+    expect(toMcpContent(result)[1]).toEqual({ type: "resource", resource: { uri: "fizzy-attachment:///screenshot.png", mimeType: contentType, text: "example" } });
+  });
+  it.each(["application/pdf", "text/plain"])("embeds invalid UTF8 as blob for %s", async (contentType) => {
+    const result = await getAttachment(mockClient({ contentType, bytes: new Uint8Array([255]), byteSize: 1 }), { ...VALID_ARGS, account_slug: "123456", include_content: true });
+    expect(toMcpContent(result)[1]).toEqual({ type: "resource", resource: { uri: "fizzy-attachment:///screenshot.png", mimeType: contentType, blob: "/w==" } });
+  });
+  it.each(["true", null, 1])("rejects malformed flag %s", async (include_content) => {
+    await expect(getAttachment(mockClient(), { ...VALID_ARGS, account_slug: "123456", include_content })).rejects.toThrow("include_content must be a boolean");
+  });
+  it.each([{ text: "x", blob: "eA==" }, {}, { text: "x", uri: undefined }, { blob: "eA==", mimeType: undefined }])("rejects malformed resource %j", (fields) => {
+    const payload = { mcp_content: [{ type: "resource", resource: { uri: "fizzy-attachment:///example", mimeType: "text/plain", ...fields } }] };
+    expect(toMcpContent(payload)[0].type).toBe("text");
+  });
+});
+
+it("refuses invalid UTF8 beyond binary cap", async () => {
+  const { setInlineContentLimits } = await import("../../src/utils/inline-content.js");
+  setInlineContentLimits("8", "1");
+  try {
+    await expect(getAttachment(mockClient({ contentType: "text/plain", bytes: new Uint8Array([255, 255]) }), { ...VALID_ARGS, account_slug: "123456", include_content: true })).rejects.toThrow("inline limit for binary");
+  } finally { setInlineContentLimits(); }
+});
+it("rejects URL arguments with opt in", async () => {
+  await expect(getAttachment(mockClient(), { ...VALID_ARGS, account_slug: "123456", include_content: true, url: "https://example.invalid/example" })).rejects.toThrow(/does not take a URL/);
+});
+it("SDK accepts embedded resources", async () => {
+  const { CallToolResultSchema } = await import("@modelcontextprotocol/sdk/types.js");
+  for (const data of [{ text: "example" }, { blob: "eA==" }]) {
+    expect(CallToolResultSchema.safeParse({ content: [{ type: "resource", resource: { uri: "fizzy-attachment:///example", mimeType: "text/plain", ...data } }] }).success).toBe(true);
+  }
+});
+it.each(["text/plain", "application/pdf"])("handler enforces %s cap on headers and stream", async contentType => {
+  const { setInlineContentLimits } = await import("../../src/utils/inline-content.js");
+  setInlineContentLimits("4", "2");
+  try {
+    for (const declared of [true, false]) {
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(new Uint8Array(5), { headers: { "Content-Type": contentType, ...(declared ? { "Content-Length": "5" } : {}) } }));
+      const client = new RealFizzyClient({ accessToken: "synthetic-token", baseUrl: "https://example.invalid" });
+      await expect(getAttachment(client, { ...VALID_ARGS, account_slug: "123456", include_content: true })).rejects.toThrow(`inline limit for ${contentType === "text/plain" ? "text" : "binary"}`);
+      fetchMock.mockRestore();
+    }
+  } finally { setInlineContentLimits(); }
+});
+it.each([undefined, null, "example"])("rejects invalid resource object %s", resource => {
+  expect(toMcpContent({ mcp_content: [{ type: "resource", resource }] })[0].type).toBe("text");
+});
+
+describe("generic storage content types", () => {
+  it.each([
+    ["report.log", "text/plain"], ["report.TXT", "text/plain"],
+    ["data.csv", "text/csv"], ["data.tsv", "text/tab-separated-values"],
+    ["config.json", "application/json"], ["config.xml", "application/xml"],
+    ["readme.md", "text/markdown"], ["readme.MARKDOWN", "text/markdown"],
+    ["config.yaml", "text/yaml"], ["config.YML", "text/yaml"],
+  ])("decodes generic storage text %s", async (filename, mimeType) => {
+    for (const contentType of ["application/octet-stream", ""]) {
+      const result = await getAttachment(mockClient({ contentType, bytes: new TextEncoder().encode("example"), byteSize: 7 }), { ...VALID_ARGS, account_slug: "123456", filename, include_content: true });
+      expect(toMcpContent(result)[1]).toEqual({ type: "resource", resource: { uri: `fizzy-attachment:///${filename}`, mimeType, text: "example" } });
+    }
+  });
+  it.each(["example.bin", "example.zip", "example", "example.png"])("keeps generic %s binary", async filename => {
+    const result = await getAttachment(mockClient({ contentType: "application/octet-stream", bytes: new Uint8Array([255]), byteSize: 1 }), { ...VALID_ARGS, account_slug: "123456", filename, include_content: true });
+    expect(toMcpContent(result)[1]).toEqual({ type: "resource", resource: { uri: `fizzy-attachment:///${filename}`, mimeType: "application/octet-stream", blob: "/w==" } });
+  });
+  it("uses the text cap for generic log and binary cap for invalid UTF8", async () => {
+    const { setInlineContentLimits } = await import("../../src/utils/inline-content.js");
+    setInlineContentLimits("8", "2");
+    try {
+      for (const bytes of [new TextEncoder().encode("example"), new Uint8Array([255]), new Uint8Array([255, 255, 255])]) {
+        const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(bytes, { headers: { "Content-Type": "application/octet-stream", "Content-Length": String(bytes.length) } }));
+        try {
+          const client = new RealFizzyClient({ accessToken: "synthetic-token", baseUrl: "https://example.invalid" });
+          const promise = getAttachment(client, { ...VALID_ARGS, account_slug: "123456", filename: "report.log", include_content: true });
+          if (bytes.length === 3) {
+            await expect(promise).rejects.toThrow("report.log is 3 bytes, over the 2-byte inline limit for binary content.");
+          } else {
+            const block = toMcpContent(await promise)[1];
+            expect(block).toEqual({ type: "resource", resource: { uri: "fizzy-attachment:///report.log", mimeType: bytes.length === 7 ? "text/plain" : "application/octet-stream", ...(bytes.length === 7 ? { text: "example" } : { blob: "/w==" }) } });
+          }
+        } finally { fetchMock.mockRestore(); }
+      }
+    } finally { setInlineContentLimits(); }
+  });
+  it("includes declared size and text limit in errors", async () => {
+    const client = mockClient(new FizzyAttachmentTooLargeError("too big", 1048576, 2000000));
+    // The real client selects the limit from the headers before throwing.
+    client.fetchAttachment = vi.fn(async (_slug, _ref, options) => {
+      options.maxBytesFor!("application/octet-stream");
+      throw new FizzyAttachmentTooLargeError("too big", 1048576, 2000000);
+    });
+    await expect(getAttachment(client, { ...VALID_ARGS, account_slug: "123456", filename: "report.log", include_content: true })).rejects.toThrow("report.log is 2000000 bytes, over the 1048576-byte inline limit for text content.");
+  });
+});

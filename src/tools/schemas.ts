@@ -710,7 +710,7 @@ export const uploadFileSchema = z
 // each token before it reaches a path — that layer, not this one, is the
 // enforcement point, because the Cloudflare transport dispatches raw arguments
 // without running Zod at all.
-export const getAttachmentSchema = z.object({
+const attachmentRefSchema = z.object({
   account_slug: accountSlugSchema,
   signed_id: z.string().describe(
     "The attachment's ActiveStorage signed id, exactly as reported in the 'signed_id' " +
@@ -730,7 +730,11 @@ export const getAttachmentSchema = z.object({
   ),
 });
 
-export const downloadAttachmentSchema = getAttachmentSchema.extend({
+export const getAttachmentSchema = attachmentRefSchema.extend({
+  include_content: z.boolean().optional().describe("Text is detected from the reported type or, when storage reports a generic type, the file extension. Opt in to embedded text resources (1 MiB default) or binary base64 resources (512 KiB default). Binary enters the tool result and can use substantial model context. Some clients reject embedded binary resources; on client validation errors retry without include_content."),
+});
+
+export const downloadAttachmentSchema = attachmentRefSchema.extend({
   directory: z.string().optional().describe(
     "Absolute path to an existing directory on the machine running the server. Omit to use the OS temporary download directory."
   ),

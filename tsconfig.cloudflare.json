@@ -30,6 +30,7 @@
     "src/utils/client-auth.ts",
     "src/utils/file-source.ts",
     "src/utils/md5.ts",
+    "src/utils/inline-content.ts",
     "src/utils/origin.ts",
     "src/utils/path-segment.ts",
     "src/utils/projections.ts",

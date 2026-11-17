@@ -451,6 +451,8 @@ See the [Cloudflare Deployment Guide](docs/CLOUDFLARE.md) for detailed instructi
 |----------|----------|---------|-------------|
 | `FIZZY_ACCESS_TOKEN` | **stdio only** | — | Your Fizzy API access token (**required for stdio transport only**). HTTP/SSE users provide tokens via Authorization header. |
 | `FIZZY_MAX_DOWNLOAD_BYTES` | No | `104857600` | Maximum stdio attachment download size in bytes |
+| `FIZZY_MAX_INLINE_TEXT_BYTES` | No | `1048576` | Inline text cap; positive safe integer up to 10485760. |
+| `FIZZY_MAX_INLINE_BINARY_BYTES` | No | `524288` | Inline binary cap; positive safe integer up to 10485760. |
 | `FIZZY_BASE_URL` | No | `https://app.fizzy.do` | Fizzy API base URL |
 | `PORT` | No | `3000` | Port for HTTP/SSE transport |
 | `MCP_TRANSPORT` | No | `stdio` | Default transport (stdio, sse, http) |
@@ -649,6 +651,8 @@ download removes its partial file.
 
 `FIZZY_MAX_DOWNLOAD_BYTES` caps the download size (default 104857600, 100 MiB). The
 body may take up to five minutes to arrive.
+
+Use `fizzy_get_attachment` with `include_content=true` to receive text resources for UTF-8 text, JSON or XML, or base64 blob resources for other files. Text is detected from the reported type or, when storage reports a generic type, the file extension. Invalid UTF-8 falls back to binary within the binary cap. Images retain their existing limit. Binary results consume model context; if a client rejects embedded resources, retry without `include_content`.
 
 #### Attaching a file to a card or comment
 

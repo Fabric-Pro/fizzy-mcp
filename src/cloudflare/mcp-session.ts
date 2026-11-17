@@ -14,6 +14,7 @@
  * @see https://developers.cloudflare.com/durable-objects/
  */
 
+import { setInlineContentLimits } from "../utils/inline-content.js";
 import { DurableObject } from "cloudflare:workers";
 import { FizzyClient } from "../client/fizzy-client.js";
 import type {
@@ -338,6 +339,7 @@ export class McpSessionDO extends DurableObject<Env> {
     const accountSlug = (toolArgs.account_slug as string) || "unknown";
 
     try {
+      setInlineContentLimits(this.env.FIZZY_MAX_INLINE_TEXT_BYTES, this.env.FIZZY_MAX_INLINE_BINARY_BYTES);
       const result = await this.executeToolCall(toolName, toolArgs);
       const durationMs = Date.now() - startTime;
       
