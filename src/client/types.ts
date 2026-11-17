@@ -343,6 +343,9 @@ export interface AttachmentRef {
 
 /** How much of an attachment to read, and how much of it to tolerate. */
 export interface FetchAttachmentOptions {
+  /** Streaming sink; the header timeout ends before this callback starts. */
+  sink?: (body: ReadableStream<Uint8Array>, contentType: string, byteSize?: number) => Promise<void>;
+  bodyTimeoutMs?: number;
   /** Hard cap on the bytes read. Exceeding it throws rather than truncating. */
   maxBytes: number;
   /**

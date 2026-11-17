@@ -106,6 +106,7 @@ describe("published tool schemas", () => {
       ])
     );
 
+    expect(published.get("fizzy_download_attachment")).toEqual(["account_slug", "signed_id", "filename", "variation", "directory"]);
     expect(published.get("fizzy_create_comment")).toEqual([
       "account_slug",
       "card_id",

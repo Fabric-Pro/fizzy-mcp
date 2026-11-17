@@ -32,3 +32,17 @@ export function setLocalFileReader(reader: LocalFileReader | null): void {
 export function getLocalFileReader(): LocalFileReader | null {
   return localFileReader;
 }
+
+/** A sink is supplied only by the local stdio entry point. */
+export interface LocalFileWriter {
+  maxBytes: number;
+  bodyTimeoutMs: number;
+  write(body: ReadableStream<Uint8Array>, filename: string, directory?: unknown): Promise<{ path: string; byteSize: number }>;
+}
+let localFileWriter: LocalFileWriter | null = null;
+export function setLocalFileWriter(writer: LocalFileWriter | null): void {
+  localFileWriter = writer;
+}
+export function getLocalFileWriter(): LocalFileWriter | null {
+  return localFileWriter;
+}

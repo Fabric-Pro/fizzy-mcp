@@ -18,7 +18,8 @@ import { readFile } from "node:fs/promises";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { FizzyClient } from "./client/fizzy-client.js";
 import { createFizzyServer } from "./server.js";
-import { setLocalFileReader } from "./utils/file-source.js";
+import { createLocalFileWriter, parseMaxDownloadBytes } from "./local-file-writer.js";
+import { setLocalFileWriter, setLocalFileReader } from "./utils/file-source.js";
 import { 
   startHTTPTransport as startSecureHTTPTransport,
   startSSETransport as startSecureSSETransport,
@@ -122,6 +123,7 @@ async function startStdioTransport(): Promise<void> {
   // the same user who owns this process, so reading their disk grants nothing they
   // could not already do. The HTTP/SSE transports below serve remote callers and
   // deliberately never install a reader.
+  setLocalFileWriter(createLocalFileWriter(parseMaxDownloadBytes(process.env.FIZZY_MAX_DOWNLOAD_BYTES)));
   setLocalFileReader(async (path) => new Uint8Array(await readFile(path)));
 
   const client = createClient();

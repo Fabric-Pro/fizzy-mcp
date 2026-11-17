@@ -729,3 +729,9 @@ export const getAttachmentSchema = z.object({
     "reported no preview_variation, or when full resolution is genuinely needed."
   ),
 });
+
+export const downloadAttachmentSchema = getAttachmentSchema.extend({
+  directory: z.string().optional().describe(
+    "Absolute path to an existing directory on the machine running the server. Omit to use the OS temporary download directory."
+  ),
+});

@@ -774,6 +774,17 @@ export const TOOL_DEFINITIONS = {
       },
     },
     {
+      name: "fizzy_download_attachment",
+      title: "Download Attachment",
+      description:
+        "Works on the stdio transport only. Save any attachment type (including images) to a new local file and return its path. " +
+        "Get the 'signed_id' and 'filename' to pass here from fizzy_get_card or " +
+        "fizzy_get_card_comments called with include_attachments=true — this tool takes no URL. " +
+        "Pass 'preview_variation' as 'variation' to download the preview instead of the original.",
+      schema: schemas.downloadAttachmentSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    {
       name: "fizzy_get_attachment",
       title: "Get Attachment",
       description:

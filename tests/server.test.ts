@@ -3,7 +3,7 @@
  * 
  * API Reference: https://github.com/basecamp/fizzy/blob/main/docs/API.md
  * 
- * This test suite verifies the MCP server correctly registers all 47 tools
+ * This test suite verifies the MCP server correctly registers all 55 tools
  * that map to the Fizzy REST API endpoints.
  * 
  * Endpoint Summary (RESTful - no .json extension):
@@ -79,6 +79,7 @@
  *   POST   /:slug/notifications/bulk_reading       -> fizzy_mark_all_notifications_read
  */
 
+import { ALL_TOOLS } from "../src/tools/definitions.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createFizzyServer } from "../src/server.js";
 import { FizzyClient } from "../src/client/fizzy-client.js";
@@ -145,70 +146,9 @@ describe("FizzyServer", () => {
   });
 
   describe("Tool count verification", () => {
-    it("should have all 47 tools registered", () => {
-      // List of all expected tool names
-      const expectedTools = [
-        // Identity & Accounts (2)
-        "fizzy_get_identity",
-        "fizzy_get_accounts",
-        // Boards (5)
-        "fizzy_get_boards",
-        "fizzy_get_board",
-        "fizzy_create_board",
-        "fizzy_update_board",
-        "fizzy_delete_board",
-        // Cards (5)
-        "fizzy_get_cards",
-        "fizzy_get_card",
-        "fizzy_create_card",
-        "fizzy_update_card",
-        "fizzy_delete_card",
-        // Card Actions (9)
-        "fizzy_close_card",
-        "fizzy_reopen_card",
-        "fizzy_move_card_to_not_now",
-        "fizzy_move_card_to_column",
-        "fizzy_send_card_to_triage",
-        "fizzy_toggle_card_tag",
-        "fizzy_toggle_card_assignment",
-        "fizzy_watch_card",
-        "fizzy_unwatch_card",
-        // Comments (5)
-        "fizzy_get_card_comments",
-        "fizzy_get_comment",
-        "fizzy_create_comment",
-        "fizzy_update_comment",
-        "fizzy_delete_comment",
-        // Reactions (3)
-        "fizzy_get_reactions",
-        "fizzy_add_reaction",
-        "fizzy_remove_reaction",
-        // Steps (4)
-        "fizzy_get_step",
-        "fizzy_create_step",
-        "fizzy_update_step",
-        "fizzy_delete_step",
-        // Columns (5)
-        "fizzy_get_columns",
-        "fizzy_get_column",
-        "fizzy_create_column",
-        "fizzy_update_column",
-        "fizzy_delete_column",
-        // Tags (1)
-        "fizzy_get_tags",
-        // Users (4)
-        "fizzy_get_users",
-        "fizzy_get_user",
-        "fizzy_update_user",
-        "fizzy_deactivate_user",
-        // Notifications (4)
-        "fizzy_get_notifications",
-        "fizzy_mark_notification_read",
-        "fizzy_mark_notification_unread",
-        "fizzy_mark_all_notifications_read",
-      ];
-
-      expect(expectedTools).toHaveLength(47);
+    it("should have all 55 tools registered", () => {
+      expect(ALL_TOOLS).toHaveLength(55);
+      expect(ALL_TOOLS.map(tool => tool.name)).toContain("fizzy_download_attachment");
     });
   });
 });

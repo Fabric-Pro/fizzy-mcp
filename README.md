@@ -27,7 +27,7 @@ This MCP server allows AI assistants like Claude, Cursor, and GitHub Copilot to 
   - [For Other MCP-Compatible IDEs](#for-other-mcp-compatible-ides)
 - [Running the Server](#running-the-server)
 - [Environment Variables](#environment-variables)
-- [Available Tools](#available-tools-47-total)
+- [Available Tools](#available-tools-55-total)
 - [Example Prompts](#example-prompts)
 - [Troubleshooting](#troubleshooting)
 - [FAQ](#faq)
@@ -450,6 +450,7 @@ See the [Cloudflare Deployment Guide](docs/CLOUDFLARE.md) for detailed instructi
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `FIZZY_ACCESS_TOKEN` | **stdio only** | — | Your Fizzy API access token (**required for stdio transport only**). HTTP/SSE users provide tokens via Authorization header. |
+| `FIZZY_MAX_DOWNLOAD_BYTES` | No | `104857600` | Maximum stdio attachment download size in bytes |
 | `FIZZY_BASE_URL` | No | `https://app.fizzy.do` | Fizzy API base URL |
 | `PORT` | No | `3000` | Port for HTTP/SSE transport |
 | `MCP_TRANSPORT` | No | `stdio` | Default transport (stdio, sse, http) |
@@ -524,7 +525,7 @@ npx fizzy-mcp --transport http --port 3000
 
 ---
 
-## Available Tools (54 total)
+## Available Tools (55 total)
 
 ### Identity & Accounts (2)
 | Tool | Description |
@@ -622,11 +623,32 @@ npx fizzy-mcp --transport http --port 3000
 | `fizzy_mark_notification_unread` | Mark notification as unread |
 | `fizzy_mark_all_notifications_read` | Mark all notifications as read |
 
-### Attachments (2)
+### Attachments (3)
 | Tool | Description |
 |------|-------------|
 | `fizzy_upload_file` | Upload a file and get back HTML that embeds it in rich text |
+| `fizzy_download_attachment` | Save any attachment type to a new local file (stdio only) |
 | `fizzy_get_attachment` | Fetch a file already attached to a card or comment; images come back as an image |
+
+#### Downloading an attachment locally
+
+`fizzy_download_attachment` saves images, videos, PDFs, logs, and other attachments
+on the machine running the stdio server and returns `path`, `filename`,
+`content_type`, `byte_size`, and `variant`. Obtain `signed_id` and `filename` from
+`fizzy_get_card` or `fizzy_get_card_comments` with `include_attachments=true`.
+Pass `preview_variation` as `variation` to save a preview.
+
+It works only on the stdio transport, where the server runs on your own machine. On
+HTTP, SSE and Cloudflare Workers the server is remote, so the tool returns an error
+instead of writing to the server's disk.
+
+The optional `directory` must be an absolute path to an existing directory. Each
+download goes into a new, private subdirectory (of `directory`, or of the OS temporary
+directory when it is omitted), so an existing file is not overwritten. A failed
+download removes its partial file.
+
+`FIZZY_MAX_DOWNLOAD_BYTES` caps the download size (default 104857600, 100 MiB). The
+body may take up to five minutes to arrive.
 
 #### Attaching a file to a card or comment
 
@@ -826,7 +848,7 @@ npx @modelcontextprotocol/inspector
 
 **4. Test the connection:**
 - Click "Connect"
-- You should see the list of 47 available tools
+- You should see the list of 55 available tools
 - Try calling tools like `fizzy_get_identity` or `fizzy_get_boards`
 
 **Note**: MCP Inspector does not support the deprecated SSE transport. Always use HTTP transport for testing.
