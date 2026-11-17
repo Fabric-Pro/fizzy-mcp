@@ -408,3 +408,16 @@ describe("fetchAttachment body bounding on non-success paths", () => {
     expect(state.pulled).toBeLessThan(8);
   });
 });
+
+describe("per media type cap", () => {
+  it.each(["text/plain", "application/pdf"])("bounds %s", async type => {
+    for (const declared of [true, false]) {
+      let pulls = 0;
+      stubFetch(() => new Response(new ReadableStream({
+        pull(controller) { pulls++; controller.enqueue(new Uint8Array(3)); if (pulls === 8) controller.close(); },
+      }, { highWaterMark: 0 }), { headers: { "Content-Type": type, ...(declared ? { "Content-Length": "24" } : {}) } }));
+      await expect(client().fetchAttachment(ACCOUNT, REF, { maxBytes: 100, maxBytesFor: () => 4 })).rejects.toBeInstanceOf(FizzyAttachmentTooLargeError);
+      expect(pulls).toBe(declared ? 0 : 2);
+    }
+  });
+});

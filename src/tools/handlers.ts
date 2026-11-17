@@ -8,6 +8,7 @@
  * for wrapping it in the appropriate MCP response format.
  */
 
+import { getInlineContentLimits, classifyInlineContent } from "../utils/inline-content.js";
 import { getLocalFileWriter } from "../utils/file-source.js";
 import type { FizzyClient } from "../client/fizzy-client.js";
 import {
@@ -35,6 +36,12 @@ import {
   summarizeNotification,
 } from "../utils/projections.js";
 
+function inlineLimitMessage(filename: string, kind: string, limit: number, byteSize?: number): string {
+  const size = byteSize === undefined ? "is" : `is ${byteSize} bytes,`;
+  return `${filename} ${size} over the ${limit}-byte inline limit for ${kind} content. ` +
+    "Use fizzy_download_attachment (stdio transport) or open the attachment's url in a browser.";
+}
+
 /**
  * Tool handler result - either data to serialize or a success message
  */
@@ -46,7 +53,8 @@ export type HandlerResult = unknown;
  */
 export type McpContentBlock =
   | { type: "text"; text: string }
-  | { type: "image"; data: string; mimeType: string };
+  | { type: "image"; data: string; mimeType: string }
+  | { type: "resource"; resource: { uri: string; mimeType: string } & ({ text: string; blob?: never } | { blob: string; text?: never }) };
 
 /**
  * A handler result that is already MCP content rather than data to serialize.
@@ -72,6 +80,13 @@ function isMcpContentBlock(value: unknown): value is McpContentBlock {
   if (typeof value !== "object" || value === null) return false;
   const block = value as Record<string, unknown>;
   if (block.type === "text") return typeof block.text === "string";
+  if (block.type === "resource") {
+    if (typeof block.resource !== "object" || block.resource === null) return false;
+    const resource = block.resource as Record<string, unknown>;
+    return typeof resource.uri === "string" && typeof resource.mimeType === "string" &&
+      ((typeof resource.text === "string" && !("blob" in resource)) ||
+       (typeof resource.blob === "string" && !("text" in resource)));
+  }
   if (block.type === "image") {
     return typeof block.data === "string" && typeof block.mimeType === "string";
   }
@@ -1421,17 +1436,28 @@ export const toolHandlers: Record<string, ToolHandler> = {
   // storage by hand so the Fizzy token never leaves the Fizzy origin.
   fizzy_get_attachment: async (client, args) => {
     const { accountSlug, ...ref } = parseAttachmentRequest(args);
+    if (args.include_content !== undefined && typeof args.include_content !== "boolean") {
+      throw new Error("include_content must be a boolean");
+    }
+    const include = args.include_content === true;
+    const limits = include ? getInlineContentLimits() : undefined;
+    let kind = "image";
 
     let fetched;
     try {
       fetched = await client.fetchAttachment(accountSlug, ref, {
         maxBytes: MAX_INLINE_IMAGE_BYTES,
-        // A zip or a video has nothing a model can look at, so its bytes are
-        // never downloaded — the caller gets the metadata and an explanation
-        // instead of megabytes of base64.
-        shouldReadBody: isInlineableImage,
+        // Default calls skip non-image bytes; opt-in calls use the media-type cap.
+        maxBytesFor: limits ? (type) => {
+          kind = classifyInlineContent(type, ref.filename).kind;
+          return kind === "image" ? MAX_INLINE_IMAGE_BYTES : kind === "text" ? limits.text : limits.binary;
+        } : undefined,
+        shouldReadBody: include ? () => true : isInlineableImage,
       });
     } catch (error) {
+      if (error instanceof FizzyAttachmentTooLargeError && include && kind !== "image") {
+        throw new Error(inlineLimitMessage(ref.filename, kind, error.maxBytes, error.byteSize));
+      }
       if (error instanceof FizzyAttachmentTooLargeError && ref.variation === undefined) {
         throw new Error(
           `${error.message}. Re-request it with the attachment's 'preview_variation' ` +
@@ -1458,6 +1484,22 @@ export const toolHandlers: Record<string, ToolHandler> = {
           `bytes were not downloaded. Open the attachment's 'url' in a browser to view it. ` +
           `On the stdio transport, fizzy_download_attachment can save the file locally.`,
       };
+    }
+
+    const classification = classifyInlineContent(contentType, ref.filename);
+    if (include && classification.kind !== "image") {
+      let text: string | undefined;
+      if (classification.kind === "text") {
+        try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(fetched.bytes); } catch { /* Binary fallback below. */ }
+      }
+      if (text === undefined && fetched.bytes.length > limits!.binary) {
+        throw new Error(inlineLimitMessage(ref.filename, "binary", limits!.binary, fetched.bytes.length));
+      }
+      const resource = { uri: `fizzy-attachment:///${encodeURIComponent(ref.filename)}`, mimeType: contentType };
+      return mcpContent([
+        { type: "text", text: JSON.stringify({ ...summary, content: text === undefined ? "blob" : "text" }, null, 2) },
+        { type: "resource", resource: text === undefined ? { ...resource, blob: bytesToBase64(fetched.bytes) } : { ...resource, mimeType: classification.mimeType, text } },
+      ]);
     }
 
     return mcpContent([

@@ -1965,10 +1965,12 @@ export class FizzyClient {
         const declared = Number(response.headers?.get?.("Content-Length") ?? Number.NaN);
         const byteSize = Number.isSafeInteger(declared) && declared >= 0 ? declared : undefined;
 
+        const maxBytes = options.maxBytesFor?.(contentType) ?? options.maxBytes;
+
         if (options.sink) {
-          if (byteSize !== undefined && byteSize > options.maxBytes) {
+          if (byteSize !== undefined && byteSize > maxBytes) {
             await response.body?.cancel().catch(() => {});
-            throw new FizzyAttachmentTooLargeError(`${ref.filename} is ${byteSize} bytes, over the ${options.maxBytes}-byte limit for a download`, options.maxBytes, byteSize);
+            throw new FizzyAttachmentTooLargeError(`${ref.filename} is ${byteSize} bytes, over the ${maxBytes}-byte limit for a download`, maxBytes, byteSize);
           }
           clearTimeout(timeoutId);
           const bodyTimeoutMs = options.bodyTimeoutMs ?? 300000;
@@ -1989,7 +1991,7 @@ export class FizzyClient {
           return { contentType, byteSize };
         }
 
-        const bytes = await this.readBoundedBody(response, options.maxBytes, ref.filename);
+        const bytes = await this.readBoundedBody(response, maxBytes, ref.filename);
         return { contentType, bytes, byteSize: bytes.length };
       }
 

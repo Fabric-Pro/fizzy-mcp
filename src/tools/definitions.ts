@@ -791,7 +791,7 @@ export const TOOL_DEFINITIONS = {
         "Fetch a file already attached to a card or comment and return it so it can actually be " +
         "looked at. Images (PNG, JPEG, GIF, WebP) come back as an image the model can see; any " +
         "other type comes back as metadata with a note that it cannot be rendered, and its bytes " +
-        "are not downloaded. " +
+        "are not downloaded unless include_content=true. Text is detected from the reported type or, when storage reports a generic type, the file extension. Opt in for text resources (1 MiB default) or binary base64 resources (512 KiB default), configurable by environment. Binary enters the tool result and can use substantial model context. Some clients reject embedded binary resources; on client-side validation errors retry without include_content. " +
         "Get the 'signed_id' and 'filename' to pass here from fizzy_get_card or " +
         "fizzy_get_card_comments called with include_attachments=true — this tool takes no URL, " +
         "and building the arguments from a URL by hand will not work. " +

@@ -348,6 +348,7 @@ export interface FetchAttachmentOptions {
   bodyTimeoutMs?: number;
   /** Hard cap on the bytes read. Exceeding it throws rather than truncating. */
   maxBytes: number;
+  maxBytesFor?: (contentType: string) => number;
   /**
    * Whether the body is worth downloading, given the type the server reports.
    * Returning false leaves `bytes` unset and cancels the body — the difference

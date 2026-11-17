@@ -14,6 +14,7 @@
  * - Configure via environment variables: MCP_ALLOWED_ORIGINS, MCP_AUTH_TOKEN
  */
 
+import { setInlineContentLimits, getInlineContentLimits } from "./utils/inline-content.js";
 import { readFile } from "node:fs/promises";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { FizzyClient } from "./client/fizzy-client.js";
@@ -179,6 +180,8 @@ async function startHTTPTransport(port: number): Promise<void> {
 
 // Main entry point
 async function main(): Promise<void> {
+  setInlineContentLimits(process.env.FIZZY_MAX_INLINE_TEXT_BYTES, process.env.FIZZY_MAX_INLINE_BINARY_BYTES);
+  getInlineContentLimits();
   const { transport, port } = parseArgs();
   validateConfig(transport);
 
